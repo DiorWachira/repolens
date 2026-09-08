@@ -1,4 +1,5 @@
-const state = { report: null, filter: "all" };
+const HISTORY_KEY = "repolens-session-history";
+const state = { report: null, filter: "all", history: loadHistory() };
 
 const elements = {
   score: document.querySelector("#scoreValue"),
@@ -19,7 +20,64 @@ const elements = {
   grid: document.querySelector("#checksGrid"),
   actionCount: document.querySelector("#actionCount"),
   actionsList: document.querySelector("#actionsList"),
+  historyCount: document.querySelector("#historyCount"),
+  historyList: document.querySelector("#historyList"),
+  clearHistory: document.querySelector("#clearHistory"),
 };
+
+function loadHistory() {
+  try {
+    return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(report, url) {
+  const entry = { id: `${Date.now()}`, url, report, scannedAt: new Date().toISOString() };
+  state.history = [entry, ...state.history.filter((item) => item.url !== url)].slice(0, 12);
+  sessionStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
+  renderHistory();
+}
+
+function renderHistory() {
+  elements.historyCount.textContent = state.history.length;
+  if (!state.history.length) {
+    elements.historyList.innerHTML = '<p class="history-empty">No scans saved in this browser session yet.</p>';
+    return;
+  }
+  elements.historyList.innerHTML = "";
+  state.history.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "history-item";
+    const repo = document.createElement("div");
+    repo.className = "history-repo";
+    const title = document.createElement("strong");
+    title.textContent = entry.report.root.replace("github.com/", "");
+    const date = document.createElement("span");
+    date.textContent = new Date(entry.scannedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    repo.append(title, date);
+    const score = document.createElement("span");
+    score.className = "history-score";
+    score.textContent = `${entry.report.score}`;
+    const open = document.createElement("button");
+    open.className = "history-open";
+    open.type = "button";
+    open.title = "Open this report";
+    open.textContent = "->";
+    open.addEventListener("click", () => {
+      state.report = entry.report;
+      elements.source.textContent = "source repository";
+      elements.updated.textContent = entry.report.root.replace("github.com/", "");
+      elements.formStatus.className = "form-status";
+      elements.formStatus.textContent = "Showing a saved scan from this session.";
+      render();
+      document.querySelector("#actionsHeading").scrollIntoView({ behavior: "smooth" });
+    });
+    item.append(repo, score, open);
+    elements.historyList.append(item);
+  });
+}
 
 const FIX_GUIDANCE = {
   readme: {
@@ -109,6 +167,7 @@ async function analyzeRepository(event) {
     if (!response.ok) throw new Error(start.error || "Could not start analysis");
     const payload = await pollJob(start.job_id);
     state.report = payload;
+    saveHistory(payload, url);
     elements.source.textContent = "source repository";
     elements.updated.textContent = payload.root;
     elements.formStatus.className = "form-status";
@@ -150,4 +209,10 @@ document.querySelectorAll(".filter-button").forEach((button) => {
 });
 document.querySelector("#refreshButton").addEventListener("click", loadReport);
 elements.form.addEventListener("submit", analyzeRepository);
+elements.clearHistory.addEventListener("click", () => {
+  state.history = [];
+  sessionStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+});
+renderHistory();
 loadReport();
