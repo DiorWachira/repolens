@@ -84,6 +84,13 @@ class TestTodosAndLargeFiles(RepoFixture):
         self.write("app.py", "x")
         self.assertIs(self.result("large-files").status, Status.PASS)
 
+    def test_large_file_detail_lists_all_offenders(self) -> None:
+        self.write("first.bin", "x" * 5_000_001)
+        self.write("second.bin", "x" * 5_000_002)
+        result = self.result("large-files")
+        self.assertIn("first.bin", result.detail)
+        self.assertIn("second.bin", result.detail)
+
 
 class TestSecrets(RepoFixture):
     @staticmethod
@@ -113,6 +120,13 @@ class TestSecrets(RepoFixture):
     def test_private_key_block_is_detected(self) -> None:
         self.write("id_rsa.txt", "-----BEGIN " + "RSA PRIVATE KEY-----")
         self.assertIs(self.result("secrets").status, Status.FAIL)
+
+    def test_secret_detail_lists_every_location(self) -> None:
+        self.write("first.py", self.assignment("TOKEN", "abcdefgh12345678"))
+        self.write("second.py", self.assignment("PASSWORD", "abcdefgh87654321"))
+        result = self.result("secrets")
+        self.assertIn("first.py:1", result.detail)
+        self.assertIn("second.py:1", result.detail)
 
     def test_ignored_directories_are_not_scanned(self) -> None:
         self.write("node_modules/pkg/config.js", self.assignment("token", "abcdef1234567890"))

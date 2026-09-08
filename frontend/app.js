@@ -74,7 +74,22 @@ function renderHistory() {
       render();
       document.querySelector("#actionsHeading").scrollIntoView({ behavior: "smooth" });
     });
-    item.append(repo, score, open);
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+    const markdown = document.createElement("button");
+    markdown.className = "history-export";
+    markdown.type = "button";
+    markdown.textContent = "MD";
+    markdown.title = "Download Markdown report";
+    markdown.addEventListener("click", () => exportMarkdown(entry.report));
+    const pdf = document.createElement("button");
+    pdf.className = "history-export";
+    pdf.type = "button";
+    pdf.textContent = "PDF";
+    pdf.title = "Print or save as PDF";
+    pdf.addEventListener("click", () => exportPdf(entry.report));
+    actions.append(markdown, pdf, open);
+    item.append(repo, score, actions);
     elements.historyList.append(item);
   });
 }
@@ -85,14 +100,52 @@ const FIX_GUIDANCE = {
     warn: "Expand the root README to at least 300 characters with setup, usage, and development details.",
     fail: "Add a README.md, README.rst, or README.txt at the repository root with setup and usage instructions.",
   },
-  license: { pass: "No action needed.", warn: "Add a LICENSE or COPYING file so users can understand the reuse terms." },
-  gitignore: { pass: "No action needed.", warn: "Add a .gitignore covering generated files, environments, caches, and local secrets." },
-  tests: { pass: "No action needed.", fail: "Add automated tests in a tests directory or test files recognized by repolens." },
-  ci: { pass: "No action needed.", warn: "Add a CI workflow under .github/workflows, or configure GitLab CI, Azure Pipelines, or Jenkins." },
-  todos: { pass: "No action needed.", warn: "Resolve or track the TODO, FIXME, HACK, and XXX markers until there are 10 or fewer." },
-  "large-files": { pass: "No action needed.", warn: "Remove or replace files over 5 MB, and keep build artifacts out of version control." },
-  secrets: { pass: "No action needed.", fail: "Remove the credential, rotate it immediately, and load the replacement from environment or secret storage." },
+  license: { pass: "No action needed.", warn: "Add a LICENSE or COPYING file. Choose a license, save its official text at the repository root, and mention it in the README." },
+  gitignore: { pass: "No action needed.", warn: "Add a .gitignore covering generated files, environments, caches, and local secrets. Remove already-tracked artifacts with git rm --cached." },
+  tests: { pass: "No action needed.", fail: "Add automated tests in a tests directory or recognized test files. Run them in CI so regressions block merges." },
+  ci: { pass: "No action needed.", warn: "Add a workflow under .github/workflows that installs dependencies, runs tests, and reports failures on pull requests." },
+  todos: { pass: "No action needed.", warn: "Review each TODO, FIXME, HACK, and XXX. Fix completed work, convert real follow-ups into tracked issues, and keep the marker count at 10 or fewer." },
+  "large-files": { pass: "No action needed.", warn: "Remove large generated/media files from git history or move them to release storage or Git LFS. Add an ignore rule, then verify with git ls-files." },
+  secrets: { pass: "No action needed.", fail: "For every listed location: remove the literal, rotate/revoke the exposed credential, replace it with an environment variable or secret manager reference, then scan git history." },
 };
+
+function reportMarkdown(report) {
+  const lines = [`# repolens report: ${report.root}`, "", `**Health:** ${report.score}/100`, "", "## Checks", ""];
+  report.checks.forEach((check) => {
+    lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
+  });
+  lines.push("## What to fix next", "");
+  const actions = report.checks.filter((check) => check.status !== "pass");
+  if (!actions.length) lines.push("All checks are passing. There is nothing urgent to fix.");
+  actions.forEach((check) => lines.push(`- **${check.title}:** ${check.detail}\n  ${FIX_GUIDANCE[check.id][check.status]}`));
+  return lines.join("\n");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;",
+  }[character]));
+}
+
+function exportMarkdown(report) {
+  const name = report.root.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "repolens-report";
+  const blob = new Blob([reportMarkdown(report)], { type: "text/markdown;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${name}-report.md`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function exportPdf(report) {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
+  const checks = report.checks.map((check) => `<li><strong>${escapeHtml(check.status.toUpperCase())} - ${escapeHtml(check.title)}</strong><br>${escapeHtml(check.detail)}<br><em>${escapeHtml(FIX_GUIDANCE[check.id][check.status])}</em></li>`).join("");
+  printWindow.document.write(`<title>repolens report - ${escapeHtml(report.root)}</title><style>body{font:14px Arial;max-width:800px;margin:40px auto;color:#16201d}h1{font-size:28px}h2{border-bottom:1px solid #ccc;padding-bottom:8px}li{margin:12px 0;line-height:1.5}</style><h1>repolens report</h1><p><strong>Repository:</strong> ${escapeHtml(report.root)}<br><strong>Health:</strong> ${escapeHtml(report.score)}/100</p><h2>Checks</h2><ul>${checks}</ul>`);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
 
 function statusLabel(status) {
   return status === "pass" ? "healthy" : status === "warn" ? "advisory" : "blocking";

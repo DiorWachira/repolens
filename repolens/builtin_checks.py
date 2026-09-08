@@ -104,11 +104,12 @@ def large_files(repo: Repo) -> CheckResult:
     offenders = [(p, repo.size_of(p)) for p in repo.files if repo.size_of(p) > LARGE_FILE_BYTES]
     if offenders:
         worst = max(offenders, key=lambda item: item[1])
+        locations = "; ".join(f"{path} ({size // 1_000_000} MB)" for path, size in offenders)
         return CheckResult(
             "large-files",
             "No oversized files committed",
             Status.WARN,
-            f"{len(offenders)} files > 5 MB, largest {worst[0]} ({worst[1] // 1_000_000} MB)",
+            f"{len(offenders)} files > 5 MB, largest {worst[0]} ({worst[1] // 1_000_000} MB); affected: {locations}",
         )
     return CheckResult("large-files", "No oversized files committed", Status.PASS, "none over 5 MB")
 
@@ -133,6 +134,6 @@ def secrets(repo: Repo) -> CheckResult:
             "secrets",
             "No hardcoded secrets",
             Status.FAIL,
-            f"{len(findings)} suspected secrets, first at {findings[0]}",
+            f"{len(findings)} suspected secrets; locations: {'; '.join(findings)}",
         )
     return CheckResult("secrets", "No hardcoded secrets", Status.PASS, "no credential-like literals found")
