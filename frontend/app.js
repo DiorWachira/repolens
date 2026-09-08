@@ -37,7 +37,6 @@ function saveHistory(report, url) {
   const entry = { id: `${Date.now()}`, url, report, scannedAt: new Date().toISOString() };
   state.history = [entry, ...state.history.filter((item) => item.url !== url)].slice(0, 12);
   sessionStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
-  renderHistory();
 }
 
 function renderHistory() {
@@ -270,10 +269,4 @@ document.querySelectorAll(".filter-button").forEach((button) => {
 });
 document.querySelector("#refreshButton").addEventListener("click", loadReport);
 elements.form.addEventListener("submit", analyzeRepository);
-elements.clearHistory.addEventListener("click", () => {
-  state.history = [];
-  sessionStorage.removeItem(HISTORY_KEY);
-  renderHistory();
-});
-renderHistory();
 loadReport();
