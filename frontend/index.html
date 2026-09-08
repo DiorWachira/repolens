@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10211d">
+    <title>repolens / repository health</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="repolens home">
+          <span class="brand-mark" aria-hidden="true">/</span>
+          <span>repolens</span>
+        </a>
+        <div class="topbar-meta">
+          <span class="live-dot"></span>
+          <span>local repository lens</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">Repository health / current snapshot</p>
+            <h1>Know what is healthy.<br><em>See what needs care.</em></h1>
+            <p class="lede">A quiet, useful view of the signals behind your command-line audit.</p>
+            <div class="command-chip"><span>$</span> python -m repolens . --json</div>
+          </div>
+          <div class="score-panel" aria-label="Overall repository health">
+            <div class="score-ring" id="scoreRing"><span id="scoreValue">--</span><small>/100</small></div>
+            <div class="score-label">overall health</div>
+            <div class="score-note" id="scoreNote">Loading report...</div>
+          </div>
+        </section>
+
+        <section class="summary-strip" aria-label="Check summary">
+          <div class="summary-item"><span class="summary-number pass-text" id="passCount">-</span><span>passing checks</span></div>
+          <div class="summary-item"><span class="summary-number warn-text" id="warnCount">-</span><span>advisories</span></div>
+          <div class="summary-item"><span class="summary-number fail-text" id="failCount">-</span><span>blocking issues</span></div>
+          <div class="summary-item summary-updated"><span>last scanned</span><strong id="updatedAt">--</strong></div>
+        </section>
+
+        <section class="checks-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Signal board</p>
+              <h2>Checks in focus</h2>
+            </div>
+            <div class="controls" role="group" aria-label="Filter checks">
+              <button class="filter-button is-active" data-filter="all">All</button>
+              <button class="filter-button" data-filter="pass">Pass</button>
+              <button class="filter-button" data-filter="warn">Warn</button>
+              <button class="filter-button" data-filter="fail">Fail</button>
+              <button class="refresh-button" id="refreshButton" title="Refresh report"><span aria-hidden="true">&#8635;</span> Refresh</button>
+            </div>
+          </div>
+          <div class="checks-grid" id="checksGrid" aria-live="polite"></div>
+        </section>
+
+        <section class="footer-panel">
+          <div class="footer-icon">{ }</div>
+          <div>
+            <strong>One small command, a clearer starting point.</strong>
+            <p>Run the audit from the repository root, then refresh this page to see the latest JSON snapshot.</p>
+          </div>
+          <code>python -m repolens . --json</code>
+        </section>
+      </main>
+
+      <footer class="site-footer"><span>repolens 0.1.0</span><span>zero dependencies / standard library core</span></footer>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

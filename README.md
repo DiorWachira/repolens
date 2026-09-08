@@ -70,6 +70,17 @@ python -m unittest discover -s tests -v
 python -m repolens .
 ```
 
+### Frontend dashboard
+
+The project includes a dependency-free browser dashboard for the JSON report:
+
+```bash
+python -m repolens . --json > frontend/report.json
+python -m http.server 8000 --directory frontend
+```
+
+Open `http://localhost:8000` to explore the current check results. Refresh the page after regenerating the report.
+
 ### Adding a check
 
 The repo ships an agent skill that encodes the whole workflow — check contract, test fixture pattern, docs update and verification steps. In an agent-enabled editor run:
