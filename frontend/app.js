@@ -17,6 +17,23 @@ const elements = {
   progressMessage: document.querySelector("#progressMessage"),
   progressPercent: document.querySelector("#progressPercent"),
   grid: document.querySelector("#checksGrid"),
+  actionCount: document.querySelector("#actionCount"),
+  actionsList: document.querySelector("#actionsList"),
+};
+
+const FIX_GUIDANCE = {
+  readme: {
+    pass: "Keep the root README current as the project changes.",
+    warn: "Expand the root README to at least 300 characters with setup, usage, and development details.",
+    fail: "Add a README.md, README.rst, or README.txt at the repository root with setup and usage instructions.",
+  },
+  license: { pass: "No action needed.", warn: "Add a LICENSE or COPYING file so users can understand the reuse terms." },
+  gitignore: { pass: "No action needed.", warn: "Add a .gitignore covering generated files, environments, caches, and local secrets." },
+  tests: { pass: "No action needed.", fail: "Add automated tests in a tests directory or test files recognized by repolens." },
+  ci: { pass: "No action needed.", warn: "Add a CI workflow under .github/workflows, or configure GitLab CI, Azure Pipelines, or Jenkins." },
+  todos: { pass: "No action needed.", warn: "Resolve or track the TODO, FIXME, HACK, and XXX markers until there are 10 or fewer." },
+  "large-files": { pass: "No action needed.", warn: "Remove or replace files over 5 MB, and keep build artifacts out of version control." },
+  secrets: { pass: "No action needed.", fail: "Remove the credential, rotate it immediately, and load the replacement from environment or secret storage." },
 };
 
 function statusLabel(status) {
@@ -44,10 +61,20 @@ function render() {
   elements.grid.innerHTML = checks.map((check, index) => `
     <article class="check-card" style="animation-delay: ${index * 55}ms">
       <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
-      <div><h3>${check.title}</h3><p class="check-detail">${check.detail}</p></div>
+      <div><h3>${check.title}</h3><p class="check-detail">${check.detail}</p><p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
       <span class="check-id">${check.id}</span>
     </article>
   `).join("");
+
+  const actions = report.checks.filter((check) => check.status !== "pass");
+  elements.actionCount.textContent = actions.length ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "clear";
+  elements.actionsList.innerHTML = actions.length ? actions.map((check) => `
+    <article class="action-item">
+      <span class="status-dot ${check.status}"></span>
+      <strong class="action-title">${check.title}</strong>
+      <p class="action-copy"><strong>${check.detail}</strong><br>${FIX_GUIDANCE[check.id][check.status]}</p>
+    </article>
+  `).join("") : '<p class="all-clear">All checks are passing. There is nothing urgent to fix.</p>';
 }
 
 async function loadReport() {
