@@ -111,7 +111,7 @@ const FIX_GUIDANCE = {
 function reportMarkdown(report) {
   const lines = [`# repolens report: ${report.root}`, "", `**Health:** ${report.score}/100`, "", "## Checks", ""];
   report.checks.forEach((check) => {
-    lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
+    lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, ...(check.locations || []).map((location) => `- Location: ${location}`), `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
   });
   lines.push("## What to fix next", "");
   const actions = report.checks.filter((check) => check.status !== "pass");
@@ -130,7 +130,6 @@ function evidenceMarkup(check) {
   if (!check.locations || !check.locations.length) return "";
   return `<details class="evidence"><summary>Show ${check.locations.length} affected location${check.locations.length === 1 ? "" : "s"}</summary><ul>${check.locations.map((location) => `<li><code>${escapeHtml(location)}</code></li>`).join("")}</ul></details>`;
 }
-  lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, ...(check.locations || []).map((location) => `- Location: ${location}`), `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
 
 function exportMarkdown(report) {
   const name = report.root.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "repolens-report";
@@ -177,8 +176,7 @@ function render() {
   elements.grid.innerHTML = checks.map((check, index) => `
     <article class="check-card" style="animation-delay: ${index * 55}ms">
       <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
-      <div><h3>${check.title}</h3><p class="check-detail">${check.detail}</p><p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
-        <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p>${evidenceMarkup(check)}<p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
+      <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p>${evidenceMarkup(check)}<p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
       <span class="check-id">${check.id}</span>
     </article>
   `).join("");
@@ -189,7 +187,6 @@ function render() {
     <article class="action-item">
       <span class="status-dot ${check.status}"></span>
       <strong class="action-title">${check.title}</strong>
-      <p class="action-copy"><strong>${check.detail}</strong><br>${FIX_GUIDANCE[check.id][check.status]}</p>
       <p class="action-copy"><strong>${escapeHtml(check.detail)}</strong><br>${FIX_GUIDANCE[check.id][check.status]}${evidenceMarkup(check)}</p>
     </article>
   `).join("") : '<p class="all-clear">All checks are passing. There is nothing urgent to fix.</p>';
