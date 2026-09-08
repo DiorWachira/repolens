@@ -20,7 +20,8 @@ from repolens.checks import REGISTRY, CheckResult, score
 from repolens.repo import Repo
 
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
-JOB_TIMEOUT_SECONDS = 90
+DOWNLOAD_TIMEOUT_SECONDS = 60
+JOB_TIMEOUT_SECONDS = 180
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 JOBS: dict[str, dict[str, object]] = {}
 JOBS_LOCK = threading.Lock()
@@ -48,7 +49,7 @@ def download_repository(url: str, destination: Path, update=None) -> tuple[str, 
     owner, repository = github_repo_url(url)
     archive_url = f"https://api.github.com/repos/{owner}/{repository}/zipball"
     request = Request(archive_url, headers={"User-Agent": "repolens/0.1"})
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
         content_length = int(response.headers.get("Content-Length", "0"))
         if content_length > MAX_ARCHIVE_BYTES:
             raise ValueError("repository archive is larger than 50 MB")
@@ -108,7 +109,7 @@ def run_job(job_id: str, url: str) -> None:
 
     def update(progress: int, message: str) -> None:
         if time.monotonic() - started > JOB_TIMEOUT_SECONDS:
-            raise TimeoutError("analysis timed out after 90 seconds")
+            raise TimeoutError(f"analysis timed out after {JOB_TIMEOUT_SECONDS} seconds")
         update_job(job_id, progress, message)
 
     try:

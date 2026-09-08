@@ -237,7 +237,7 @@ async function analyzeRepository(event) {
 }
 
 async function pollJob(jobId) {
-  const deadline = Date.now() + 100000;
+  const deadline = Date.now() + 190000;
   while (Date.now() < deadline) {
     const response = await fetch(`/api/report/${jobId}?ts=${Date.now()}`);
     const job = await response.json();
@@ -249,7 +249,7 @@ async function pollJob(jobId) {
     if (job.state === "error") throw new Error(job.error || job.message || "Analysis failed");
     await new Promise((resolve) => setTimeout(resolve, 450));
   }
-  throw new Error("Analysis timed out after 100 seconds");
+  throw new Error("Analysis timed out after 190 seconds");
 }
 
 document.querySelectorAll(".filter-button").forEach((button) => {
