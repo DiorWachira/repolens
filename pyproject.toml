@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repolens"
+version = "0.1.0"
+description = "Audit a repository and report on its health, with zero dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["cli", "repository", "quality", "audit", "static-analysis"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+repolens = "repolens.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["repolens*"]
