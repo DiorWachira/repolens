@@ -8,6 +8,10 @@ const elements = {
   warn: document.querySelector("#warnCount"),
   fail: document.querySelector("#failCount"),
   updated: document.querySelector("#updatedAt"),
+  source: document.querySelector("#sourceLabel"),
+  form: document.querySelector("#repoForm"),
+  input: document.querySelector("#repoUrl"),
+  formStatus: document.querySelector("#formStatus"),
   grid: document.querySelector("#checksGrid"),
 };
 
@@ -27,7 +31,9 @@ function render() {
   elements.pass.textContent = counts.pass;
   elements.warn.textContent = counts.warn;
   elements.fail.textContent = counts.fail;
-  elements.updated.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  elements.updated.textContent = report.root === "repolens"
+    ? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : report.root.replace("github.com/", "");
   elements.scoreRing.style.background = `conic-gradient(var(--mint) ${report.score}%, rgba(245,242,233,.13) ${report.score}% 100%)`;
 
   const checks = report.checks.filter((check) => state.filter === "all" || check.status === state.filter);
@@ -52,6 +58,28 @@ async function loadReport() {
   }
 }
 
+async function analyzeRepository(event) {
+  event.preventDefault();
+  const url = elements.input.value.trim();
+  if (!url) return;
+  elements.formStatus.className = "form-status loading";
+  elements.formStatus.textContent = "Fetching archive and running checks...";
+  try {
+    const response = await fetch(`/api/report?url=${encodeURIComponent(url)}`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not analyze repository");
+    state.report = payload;
+    elements.source.textContent = "source repository";
+    elements.updated.textContent = payload.root;
+    elements.formStatus.className = "form-status";
+    elements.formStatus.textContent = "Analysis complete. Results below are from the public repository.";
+    render();
+  } catch (error) {
+    elements.formStatus.className = "form-status error";
+    elements.formStatus.textContent = error.message;
+  }
+}
+
 document.querySelectorAll(".filter-button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".filter-button").forEach((item) => item.classList.remove("is-active"));
@@ -61,4 +89,5 @@ document.querySelectorAll(".filter-button").forEach((button) => {
   });
 });
 document.querySelector("#refreshButton").addEventListener("click", loadReport);
+elements.form.addEventListener("submit", analyzeRepository);
 loadReport();

@@ -29,6 +29,14 @@
             <p class="eyebrow">Repository health / current snapshot</p>
             <h1>Know what is healthy.<br><em>See what needs care.</em></h1>
             <p class="lede">A quiet, useful view of the signals behind your command-line audit.</p>
+            <form class="url-form" id="repoForm">
+              <label for="repoUrl">Analyze a public GitHub repository</label>
+              <div class="url-input-row">
+                <input id="repoUrl" name="url" type="url" placeholder="https://github.com/owner/repository" autocomplete="url" required>
+                <button type="submit">Analyze <span aria-hidden="true">&rarr;</span></button>
+              </div>
+              <p class="form-status" id="formStatus" role="status">Reports are generated locally through the repolens server.</p>
+            </form>
             <div class="command-chip"><span>$</span> python -m repolens . --json</div>
           </div>
           <div class="score-panel" aria-label="Overall repository health">
@@ -42,7 +50,7 @@
           <div class="summary-item"><span class="summary-number pass-text" id="passCount">-</span><span>passing checks</span></div>
           <div class="summary-item"><span class="summary-number warn-text" id="warnCount">-</span><span>advisories</span></div>
           <div class="summary-item"><span class="summary-number fail-text" id="failCount">-</span><span>blocking issues</span></div>
-          <div class="summary-item summary-updated"><span>last scanned</span><strong id="updatedAt">--</strong></div>
+          <div class="summary-item summary-updated"><span id="sourceLabel">last scanned</span><strong id="updatedAt">--</strong></div>
         </section>
 
         <section class="checks-section">

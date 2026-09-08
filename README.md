@@ -76,10 +76,10 @@ The project includes a dependency-free browser dashboard for the JSON report:
 
 ```bash
 python -m repolens . --json > frontend/report.json
-python -m http.server 8000 --directory frontend
+python -m repolens.web --port 8000
 ```
 
-Open `http://localhost:8000` to explore the current check results. Refresh the page after regenerating the report.
+Open `http://localhost:8000` to explore the current check results. The dashboard also accepts a public GitHub URL and analyzes its repository archive locally. Refresh the page after regenerating the report.
 
 ### Adding a check
 
