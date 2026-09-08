@@ -127,6 +127,12 @@ function escapeHtml(value) {
   }[character]));
 }
 
+function evidenceMarkup(check) {
+  if (!check.locations || !check.locations.length) return "";
+  return `<details class="evidence"><summary>Show ${check.locations.length} affected location${check.locations.length === 1 ? "" : "s"}</summary><ul>${check.locations.map((location) => `<li><code>${escapeHtml(location)}</code></li>`).join("")}</ul></details>`;
+}
+  lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, ...(check.locations || []).map((location) => `- Location: ${location}`), `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
+
 function exportMarkdown(report) {
   const name = report.root.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "repolens-report";
   const blob = new Blob([reportMarkdown(report)], { type: "text/markdown;charset=utf-8" });
@@ -140,7 +146,7 @@ function exportMarkdown(report) {
 function exportPdf(report) {
   const printWindow = window.open("", "_blank");
   if (!printWindow) return;
-  const checks = report.checks.map((check) => `<li><strong>${escapeHtml(check.status.toUpperCase())} - ${escapeHtml(check.title)}</strong><br>${escapeHtml(check.detail)}<br><em>${escapeHtml(FIX_GUIDANCE[check.id][check.status])}</em></li>`).join("");
+  const checks = report.checks.map((check) => `<li><strong>${escapeHtml(check.status.toUpperCase())} - ${escapeHtml(check.title)}</strong><br>${escapeHtml(check.detail)}${check.locations?.length ? `<ul>${check.locations.map((location) => `<li><code>${escapeHtml(location)}</code></li>`).join("")}</ul>` : ""}<br><em>${escapeHtml(FIX_GUIDANCE[check.id][check.status])}</em></li>`).join("");
   printWindow.document.write(`<title>repolens report - ${escapeHtml(report.root)}</title><style>body{font:14px Arial;max-width:800px;margin:40px auto;color:#16201d}h1{font-size:28px}h2{border-bottom:1px solid #ccc;padding-bottom:8px}li{margin:12px 0;line-height:1.5}</style><h1>repolens report</h1><p><strong>Repository:</strong> ${escapeHtml(report.root)}<br><strong>Health:</strong> ${escapeHtml(report.score)}/100</p><h2>Checks</h2><ul>${checks}</ul>`);
   printWindow.document.close();
   printWindow.focus();
@@ -173,6 +179,7 @@ function render() {
     <article class="check-card" style="animation-delay: ${index * 55}ms">
       <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
       <div><h3>${check.title}</h3><p class="check-detail">${check.detail}</p><p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
+        <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p>${evidenceMarkup(check)}<p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
       <span class="check-id">${check.id}</span>
     </article>
   `).join("");
@@ -184,6 +191,7 @@ function render() {
       <span class="status-dot ${check.status}"></span>
       <strong class="action-title">${check.title}</strong>
       <p class="action-copy"><strong>${check.detail}</strong><br>${FIX_GUIDANCE[check.id][check.status]}</p>
+      <p class="action-copy"><strong>${escapeHtml(check.detail)}</strong><br>${FIX_GUIDANCE[check.id][check.status]}${evidenceMarkup(check)}</p>
     </article>
   `).join("") : '<p class="all-clear">All checks are passing. There is nothing urgent to fix.</p>';
 }

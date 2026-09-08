@@ -91,10 +91,15 @@ def report_for_github_url(url: str, update=None) -> dict[str, object]:
             results.append(check.run(repo))
         if update:
             update(98, "Finalizing report")
-        return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": [
-            {"id": result.id, "title": result.title, "status": result.status.value, "detail": result.detail}
-            for result in results
-        ]}
+        checks = []
+        for result in results:
+            check = {"id": result.id, "title": result.title, "status": result.status.value, "detail": result.detail}
+            if result.id == "secrets" and result.status.value == "fail":
+                check["locations"] = result.detail.split("locations: ", 1)[-1].split("; ")
+            elif result.id == "large-files" and result.status.value == "warn":
+                check["locations"] = result.detail.split("affected: ", 1)[-1].split("; ")
+            checks.append(check)
+        return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": checks}
 
 
 def update_job(job_id: str, progress: int, message: str) -> None:
