@@ -79,7 +79,7 @@ python -m repolens . --json > frontend/report.json
 python -m repolens.web --port 8000
 ```
 
-Open `http://localhost:8000` to explore the current check results. The dashboard also accepts a public GitHub URL and analyzes its repository archive locally. Refresh the page after regenerating the report.
+Open `http://localhost:8000` to explore the current check results. The dashboard also accepts a public GitHub URL and analyzes its repository archive locally, showing download, extraction and per-check progress. Refresh the page after regenerating the report.
 
 ### Adding a check
 

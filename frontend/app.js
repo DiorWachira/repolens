@@ -12,6 +12,10 @@ const elements = {
   form: document.querySelector("#repoForm"),
   input: document.querySelector("#repoUrl"),
   formStatus: document.querySelector("#formStatus"),
+  progressWrap: document.querySelector("#progressWrap"),
+  progress: document.querySelector("#analysisProgress"),
+  progressMessage: document.querySelector("#progressMessage"),
+  progressPercent: document.querySelector("#progressPercent"),
   grid: document.querySelector("#checksGrid"),
 };
 
@@ -63,21 +67,50 @@ async function analyzeRepository(event) {
   const url = elements.input.value.trim();
   if (!url) return;
   elements.formStatus.className = "form-status loading";
-  elements.formStatus.textContent = "Fetching archive and running checks...";
+  elements.formStatus.textContent = "The server will update this bar as each phase completes.";
+  elements.progressWrap.hidden = false;
+  elements.progress.value = 2;
+  elements.progressPercent.textContent = "2%";
+  elements.progressMessage.textContent = "Starting analysis";
   try {
-    const response = await fetch(`/api/report?url=${encodeURIComponent(url)}`);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Could not analyze repository");
+    const response = await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const start = await response.json();
+    if (!response.ok) throw new Error(start.error || "Could not start analysis");
+    const payload = await pollJob(start.job_id);
     state.report = payload;
     elements.source.textContent = "source repository";
     elements.updated.textContent = payload.root;
     elements.formStatus.className = "form-status";
     elements.formStatus.textContent = "Analysis complete. Results below are from the public repository.";
+    elements.progressMessage.textContent = "Analysis complete";
+    elements.progress.value = 100;
+    elements.progressPercent.textContent = "100%";
     render();
   } catch (error) {
     elements.formStatus.className = "form-status error";
     elements.formStatus.textContent = error.message;
+    elements.progressWrap.hidden = true;
   }
+}
+
+async function pollJob(jobId) {
+  const deadline = Date.now() + 100000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`/api/report/${jobId}?ts=${Date.now()}`);
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || "Analysis job unavailable");
+    elements.progress.value = job.progress;
+    elements.progressPercent.textContent = `${job.progress}%`;
+    elements.progressMessage.textContent = job.message;
+    if (job.state === "complete") return job.report;
+    if (job.state === "error") throw new Error(job.error || job.message || "Analysis failed");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+  }
+  throw new Error("Analysis timed out after 100 seconds");
 }
 
 document.querySelectorAll(".filter-button").forEach((button) => {

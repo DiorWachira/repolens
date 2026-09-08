@@ -35,6 +35,10 @@
                 <input id="repoUrl" name="url" type="url" placeholder="https://github.com/owner/repository" autocomplete="url" required>
                 <button type="submit">Analyze <span aria-hidden="true">&rarr;</span></button>
               </div>
+              <div class="progress-wrap" id="progressWrap" hidden>
+                <div class="progress-meta"><span id="progressMessage">Starting analysis</span><strong id="progressPercent">0%</strong></div>
+                <progress id="analysisProgress" max="100" value="0">0%</progress>
+              </div>
               <p class="form-status" id="formStatus" role="status">Reports are generated locally through the repolens server.</p>
             </form>
             <div class="command-chip"><span>$</span> python -m repolens . --json</div>

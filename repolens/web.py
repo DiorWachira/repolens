@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
+import threading
+import time
+import uuid
 import zipfile
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -13,12 +16,14 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from repolens import builtin_checks  # noqa: F401  (registers checks)
-from repolens.checks import run_checks
+from repolens.checks import REGISTRY, CheckResult, score
 from repolens.repo import Repo
-from repolens.report import render_json
 
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+JOB_TIMEOUT_SECONDS = 90
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+JOBS: dict[str, dict[str, object]] = {}
+JOBS_LOCK = threading.Lock()
 
 
 def github_repo_url(value: str) -> tuple[str, str]:
@@ -37,7 +42,9 @@ def github_repo_url(value: str) -> tuple[str, str]:
     return owner, repository
 
 
-def download_repository(url: str, destination: Path) -> tuple[str, str]:
+def download_repository(url: str, destination: Path, update=None) -> tuple[str, str]:
+    if update:
+        update(8, "Validating GitHub URL")
     owner, repository = github_repo_url(url)
     archive_url = f"https://api.github.com/repos/{owner}/{repository}/zipball"
     request = Request(archive_url, headers={"User-Agent": "repolens/0.1"})
@@ -46,6 +53,8 @@ def download_repository(url: str, destination: Path) -> tuple[str, str]:
         if content_length > MAX_ARCHIVE_BYTES:
             raise ValueError("repository archive is larger than 50 MB")
         archive = response.read(MAX_ARCHIVE_BYTES + 1)
+    if update:
+        update(28, "Archive downloaded")
     if len(archive) > MAX_ARCHIVE_BYTES:
         raise ValueError("repository archive is larger than 50 MB")
 
@@ -57,6 +66,8 @@ def download_repository(url: str, destination: Path) -> tuple[str, str]:
             if destination.resolve() not in target.parents:
                 raise ValueError("repository archive contains an unsafe path")
             bundle.extract(member, destination)
+    if update:
+        update(42, "Repository files extracted")
 
     roots = [path for path in destination.iterdir() if path.is_dir()]
     if len(roots) != 1:
@@ -64,12 +75,58 @@ def download_repository(url: str, destination: Path) -> tuple[str, str]:
     return owner, repository
 
 
-def report_for_github_url(url: str) -> dict[str, object]:
+def report_for_github_url(url: str, update=None) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="repolens-") as temporary:
-        owner, repository = download_repository(url, Path(temporary))
-        root = next(Path(temporary).iterdir())
-        results = run_checks(Repo(root))
-        return json.loads(render_json(results, f"github.com/{owner}/{repository}"))
+        owner, repository = download_repository(url, Path(temporary), update)
+        root = next(path for path in Path(temporary).iterdir() if path.is_dir())
+        repo = Repo(root)
+        if update:
+            update(48, "Reading repository files")
+        results: list[CheckResult] = []
+        for index, check in enumerate(REGISTRY):
+            if update:
+                progress = 50 + round(index * 45 / len(REGISTRY))
+                update(progress, f"Running {check.title}")
+            results.append(check.run(repo))
+        if update:
+            update(98, "Finalizing report")
+        return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": [
+            {"id": result.id, "title": result.title, "status": result.status.value, "detail": result.detail}
+            for result in results
+        ]}
+
+
+def update_job(job_id: str, progress: int, message: str) -> None:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job:
+            job.update({"progress": progress, "message": message})
+
+
+def run_job(job_id: str, url: str) -> None:
+    started = time.monotonic()
+
+    def update(progress: int, message: str) -> None:
+        if time.monotonic() - started > JOB_TIMEOUT_SECONDS:
+            raise TimeoutError("analysis timed out after 90 seconds")
+        update_job(job_id, progress, message)
+
+    try:
+        payload = report_for_github_url(url, update)
+        with JOBS_LOCK:
+            JOBS[job_id].update({"state": "complete", "progress": 100, "message": "Analysis complete", "report": payload})
+    except Exception as error:
+        with JOBS_LOCK:
+            JOBS[job_id].update({"state": "error", "progress": 0, "message": str(error), "error": str(error)})
+
+
+def create_job(url: str) -> str:
+    github_repo_url(url)
+    job_id = uuid.uuid4().hex
+    with JOBS_LOCK:
+        JOBS[job_id] = {"state": "running", "progress": 2, "message": "Starting analysis"}
+    threading.Thread(target=run_job, args=(job_id, url), daemon=True).start()
+    return job_id
 
 
 class ReportHandler(SimpleHTTPRequestHandler):
@@ -80,6 +137,13 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/report/"):
+            job_id = parsed.path.rsplit("/", 1)[-1]
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+            if not job:
+                return self._send_json(HTTPStatus.NOT_FOUND, {"error": "analysis job not found"})
+            return self._send_json(HTTPStatus.OK, job)
         if parsed.path != "/api/report":
             return super().do_GET()
         values = parse_qs(parsed.query).get("url", [])
@@ -89,6 +153,17 @@ class ReportHandler(SimpleHTTPRequestHandler):
             payload = report_for_github_url(values[0])
             self._send_json(HTTPStatus.OK, payload)
         except (ValueError, OSError, zipfile.BadZipFile) as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
+    def do_POST(self) -> None:
+        if urlparse(self.path).path != "/api/report":
+            return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            body = json.loads(self.rfile.read(length))
+            job_id = create_job(str(body.get("url", "")))
+            self._send_json(HTTPStatus.ACCEPTED, {"job_id": job_id})
+        except (ValueError, json.JSONDecodeError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
