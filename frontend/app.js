@@ -1,6 +1,5 @@
 const HISTORY_KEY = "repolens-session-history";
-const state = { report: null, filter: "all", history: loadHistory(), activeCheckId: null, assistantOpen: false };
-state.assistantConversation = [];
+const state = { report: null, filter: "all", history: loadHistory() };
 
 const elements = {
   score: document.querySelector("#scoreValue"),
@@ -19,34 +18,17 @@ const elements = {
   progressMessage: document.querySelector("#progressMessage"),
   progressPercent: document.querySelector("#progressPercent"),
   grid: document.querySelector("#checksGrid"),
-  detailOverlay: document.querySelector("#checkDetailOverlay"),
-  detailTitle: document.querySelector("#checkDetailTitle"),
-  detailStatus: document.querySelector("#checkDetailStatus"),
-  detailDot: document.querySelector("#checkDetailDot"),
-  detailSummary: document.querySelector("#checkDetailSummary"),
-  detailGuidance: document.querySelector("#checkDetailGuidance"),
-  detailMeta: document.querySelector("#checkDetailMeta"),
-  detailEvidence: document.querySelector("#checkDetailEvidence"),
-  closeDetail: document.querySelector("#closeCheckDetail"),
   actionCount: document.querySelector("#actionCount"),
   actionsList: document.querySelector("#actionsList"),
   historyCount: document.querySelector("#historyCount"),
   historyList: document.querySelector("#historyList"),
   clearHistory: document.querySelector("#clearHistory"),
-  assistantPanel: document.querySelector("#assistantPanel"),
-  assistantBackdrop: document.querySelector("#assistantBackdrop"),
-  assistantToggle: document.querySelector("#assistantToggle"),
-  assistantLauncher: document.querySelector("#assistantLauncher"),
-  assistantSuggestion: document.querySelector("#assistantSuggestion"),
-  assistantFocusLabel: document.querySelector("#assistantFocusLabel"),
-  assistantBadge: document.querySelector("#assistantBadge"),
-  assistantPrompts: document.querySelectorAll(".assistant-prompt"),
-  assistantChat: document.querySelector("#assistantChat"),
-  assistantTaskList: document.querySelector("#assistantTaskList"),
-  assistantInsight: document.querySelector("#assistantInsight"),
-  assistantInput: document.querySelector("#assistantInput"),
-  assistantSend: document.querySelector("#assistantSend"),
-  assistantSuggestions: document.querySelectorAll(".assistant-suggestion"),
+  aiButton: document.querySelector("#aiButton"),
+  aiHelp: document.querySelector("#aiHelp"),
+  aiOutput: document.querySelector("#aiOutput"),
+  aiSummary: document.querySelector("#aiSummary"),
+  aiRecommendations: document.querySelector("#aiRecommendations"),
+  aiWorkflow: document.querySelector("#aiWorkflow"),
 };
 
 function loadHistory() {
@@ -64,10 +46,7 @@ function saveHistory(report, url) {
 }
 
 function renderHistory() {
-  if (elements.historyCount) {
-    elements.historyCount.textContent = String(state.history.length);
-  }
-  if (!elements.historyList) return;
+  elements.historyCount.textContent = state.history.length;
   if (!state.history.length) {
     elements.historyList.innerHTML = '<p class="history-empty">No scans saved in this browser session yet.</p>';
     return;
@@ -182,212 +161,6 @@ function statusLabel(status) {
   return status === "pass" ? "healthy" : status === "warn" ? "advisory" : "blocking";
 }
 
-function renderDetailWindow(check) {
-  if (!check) {
-    elements.detailOverlay.hidden = true;
-    state.activeCheckId = null;
-    return;
-  }
-
-  elements.detailOverlay.hidden = false;
-  elements.detailTitle.textContent = check.title;
-  elements.detailStatus.textContent = statusLabel(check.status);
-  elements.detailStatus.className = `status-label ${check.status}`;
-  elements.detailDot.className = `status-dot ${check.status}`;
-  elements.detailSummary.textContent = check.detail;
-  elements.detailGuidance.textContent = `${check.status === "pass" ? "Next:" : "Fix:"} ${FIX_GUIDANCE[check.id][check.status]}`;
-  elements.detailMeta.textContent = `Signal ID: ${check.id}`;
-
-  if (check.locations && check.locations.length) {
-    elements.detailEvidence.innerHTML = `
-      <div class="detail-evidence-wrap">
-        <strong>Evidence</strong>
-        <ul>${check.locations.map((location) => `<li>${escapeHtml(location)}</li>`).join("")}</ul>
-      </div>
-    `;
-  } else {
-    elements.detailEvidence.innerHTML = '<p class="detail-empty">No issue-specific locations were reported for this check.</p>';
-  }
-}
-
-function explainCheck(check) {
-  const focus = check ? `${check.title} (${check.status})` : "overall repository health";
-  const advisory = check ? `${FIX_GUIDANCE[check.id][check.status]}` : "The report is currently healthy overall, but the assistant is tuned to highlight the next risk and explain which checks matter most.";
-  return `This repo is focused on ${focus}. The signal says: ${check ? check.detail : "the report is broadly healthy"}. The repo-only guidance is to ${advisory}`;
-}
-
-function prioritizeCheck(report) {
-  const warnings = report.checks.filter((check) => check.status !== "pass");
-  if (!warnings.length) {
-    return "The repo looks healthy overall. Prioritize maintenance work: keep docs fresh, review TODOs periodically, and maintain CI coverage as the project grows.";
-  }
-  const first = warnings[0];
-  return `The highest-priority issue is ${first.title}. It is currently marked as ${first.status}, with the summary: ${first.detail}. The recommended next move is to address the root cause first, then verify the rest of the repo remains stable.`;
-}
-
-function buildPlan(report) {
-  const actionable = report.checks.filter((check) => check.status !== "pass");
-  if (!actionable.length) {
-    return "The repo is in a strong place. Keep the plan simple: maintain docs, preserve CI, and monitor TODO churn as the codebase evolves.";
-  }
-  return actionable.slice(0, 3).map((check) => `- ${check.title}: ${FIX_GUIDANCE[check.id][check.status]}`).join(" ");
-}
-
-function assistantResponse(prompt) {
-  if (!state.report) {
-    return "Start with a repository scan to get repo-focused guidance.";
-  }
-
-  const report = state.report;
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-
-  switch (prompt) {
-    case "overview":
-      return `Overall health is ${report.score}/100. ${report.checks.filter((item) => item.status === "pass").length} checks are clear, ${report.checks.filter((item) => item.status === "warn").length} are advisory, and ${report.checks.filter((item) => item.status === "fail").length} need action. This is a repo-only summary that stays within the current health evidence.`;
-    case "priority":
-      return prioritizeCheck(report);
-    case "check":
-      return explainCheck(active);
-    case "plan":
-      return buildPlan(report);
-    default:
-      return "The repo advisor is scoped to repository health, not general-purpose chat.";
-  }
-}
-
-function resolveAssistantReply(rawText) {
-  const text = String(rawText || "").trim().toLowerCase();
-  if (!text) return "Ask about repo health, the most important fix, or explain a specific check.";
-  if (!state.report) return "Start with a repository scan to get repo-focused guidance.";
-
-  if (/(health|overview|summary|status)/.test(text)) return assistantResponse("overview");
-  if (/(first|priority|urgent|next|most important)/.test(text)) return assistantResponse("priority");
-  if (/(plan|fix|roadmap|next steps|what should i do)/.test(text)) return assistantResponse("plan");
-  if (/(check|why|explain|detail)/.test(text)) return assistantResponse("check");
-
-  const active = state.report.checks.find((item) => item.id === state.activeCheckId) || null;
-  if (active) return explainCheck(active);
-  return `I can help reason about ${state.report.root}. The repo-only scope is to explain health signals, prioritize fixes, and suggest the next evidence-backed step.`;
-}
-
-function buildAssistantTasks(report) {
-  if (!report) return [];
-  const actionable = report.checks.filter((check) => check.status !== "pass");
-  if (!actionable.length) {
-    return [
-      { label: "Maintain the current health baseline", detail: "Keep CI, docs, and test coverage in sync." },
-      { label: "Review TODO drift", detail: "Mitigate growing maintenance debt before it becomes risk." },
-    ];
-  }
-
-  return actionable.slice(0, 4).map((check) => ({
-    label: check.title,
-    detail: FIX_GUIDANCE[check.id]?.[check.status] || check.detail,
-  }));
-}
-
-function renderAssistantChat() {
-  if (!elements.assistantChat) return;
-  const conversation = state.assistantConversation.length ? state.assistantConversation : [{ role: "bot", text: "Repository analysis is ready. Select a check or ask for a repo-focused recommendation." }];
-  elements.assistantChat.innerHTML = conversation.map((message) => `
-    <div class="assistant-message assistant-message-${message.role}">
-      <p class="assistant-message-label">${message.role === "bot" ? "Advisor" : "You"}</p>
-      <p>${escapeHtml(message.text)}</p>
-    </div>
-  `).join("");
-  elements.assistantChat.scrollTop = elements.assistantChat.scrollHeight;
-}
-
-function renderAssistantInsight(report) {
-  if (!elements.assistantInsight) return;
-  if (!report) {
-    elements.assistantInsight.innerHTML = '<p class="assistant-insight-empty">No repository loaded.</p>';
-    return;
-  }
-
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-  const summary = active
-    ? `${active.title}: ${active.detail}`
-    : `Overall health score: ${report.score}/100`;
-
-  const focus = active ? active.status : (report.score >= 80 ? "pass" : report.score >= 60 ? "warn" : "fail");
-  const focusText = focus === "pass" ? "Healthy" : focus === "warn" ? "Watch" : focus === "fail" ? "Needs attention" : "Healthy";
-
-  elements.assistantInsight.innerHTML = `
-    <div class="assistant-insight-card ${focus}">
-      <span class="assistant-insight-kicker">Focus</span>
-      <strong>${escapeHtml(focusText)}</strong>
-    </div>
-    <p>${escapeHtml(summary)}</p>
-    <ul>
-      <li>${report.checks.filter((check) => check.status === "pass").length} passing checks</li>
-      <li>${report.checks.filter((check) => check.status === "warn").length} warnings</li>
-      <li>${report.checks.filter((check) => check.status === "fail").length} blockers</li>
-    </ul>
-  `;
-}
-
-function renderAssistantTasks(report) {
-  if (!elements.assistantTaskList) return;
-  const tasks = buildAssistantTasks(report);
-  elements.assistantTaskList.innerHTML = tasks.map((task) => `
-    <li class="assistant-task-item">
-      <strong>${escapeHtml(task.label)}</strong>
-      <span>${escapeHtml(task.detail)}</span>
-    </li>
-  `).join("");
-}
-
-function addAssistantMessage(role, text) {
-  const normalized = String(text || "").trim();
-  if (!normalized) return;
-  state.assistantConversation.push({ role, text: normalized });
-  state.assistantConversation = state.assistantConversation.slice(-8);
-  renderAssistantChat();
-}
-
-function renderAssistant() {
-  const report = state.report;
-  if (!report) {
-    elements.assistantBadge.textContent = "idle";
-    elements.assistantFocusLabel.textContent = "No repo loaded";
-    renderAssistantTasks(null);
-    renderAssistantInsight(null);
-    if (!state.assistantConversation.length) {
-      state.assistantConversation = [{ role: "bot", text: "Start with a repository scan to get repo-focused guidance." }];
-    }
-    renderAssistantChat();
-    return;
-  }
-
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-  const badge = active ? (active.status === "pass" ? "healthy" : active.status === "warn" ? "advisory" : "blocking") : (report.score >= 80 ? "healthy" : report.score >= 60 ? "watch" : "needs work");
-  elements.assistantBadge.textContent = badge;
-  elements.assistantFocusLabel.textContent = active ? active.title : "Overall health";
-  const prompt = document.querySelector(".assistant-prompt.is-selected")?.dataset.prompt || "overview";
-  if (!state.assistantConversation.length) {
-    state.assistantConversation = [{ role: "bot", text: assistantResponse(prompt) }];
-  }
-  renderAssistantTasks(report);
-  renderAssistantInsight(report);
-  renderAssistantChat();
-}
-
-function renderEmptyState(message = "Paste a public GitHub URL above to run your first repository analysis.") {
-  elements.score.textContent = "--";
-  elements.scoreNote.textContent = "Waiting for a repository";
-  elements.pass.textContent = "--";
-  elements.warn.textContent = "--";
-  elements.fail.textContent = "--";
-  elements.updated.textContent = "--";
-  elements.source.textContent = "last scanned";
-  elements.scoreRing.style.background = "none";
-  elements.grid.innerHTML = `<p class="check-detail empty-dashboard-state">${escapeHtml(message)}</p>`;
-  elements.actionCount.textContent = "--";
-  elements.actionsList.innerHTML = '<p class="all-clear empty-dashboard-state">Health actions will appear after the first scan.</p>';
-  renderAssistant();
-}
-
 function render() {
   const { report } = state;
   const counts = report.checks.reduce((result, check) => {
@@ -407,40 +180,12 @@ function render() {
 
   const checks = report.checks.filter((check) => state.filter === "all" || check.status === state.filter);
   elements.grid.innerHTML = checks.map((check, index) => `
-    <article class="check-card" data-check-id="${check.id}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(check.title)}" style="animation-delay: ${index * 55}ms">
+    <article class="check-card" style="animation-delay: ${index * 55}ms">
       <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
-      <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p></div>
-      <div class="check-card-footer">
-        <span class="check-id">${check.id}</span>
-        <span class="check-open-label">Open details</span>
-      </div>
+      <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p>${evidenceMarkup(check)}<p class="check-detail"><strong>${check.status === "pass" ? "Next:" : "Fix:"}</strong> ${FIX_GUIDANCE[check.id][check.status]}</p></div>
+      <span class="check-id">${check.id}</span>
     </article>
   `).join("");
-
-  elements.grid.querySelectorAll(".check-card").forEach((card) => {
-    const handleOpen = () => {
-      state.activeCheckId = card.dataset.checkId;
-      const selected = report.checks.find((check) => check.id === state.activeCheckId);
-      renderDetailWindow(selected);
-      renderAssistant();
-    };
-    card.addEventListener("click", handleOpen);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        handleOpen();
-      }
-    });
-  });
-
-  if (state.activeCheckId) {
-    const selected = report.checks.find((check) => check.id === state.activeCheckId);
-    renderDetailWindow(selected);
-  } else {
-    elements.detailOverlay.hidden = true;
-  }
-
-  renderAssistant();
 
   const actions = report.checks.filter((check) => check.status !== "pass");
   elements.actionCount.textContent = actions.length ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "clear";
@@ -454,8 +199,15 @@ function render() {
 }
 
 async function loadReport() {
-  state.report = null;
-  renderEmptyState();
+  elements.grid.innerHTML = '<p class="check-detail">Loading latest report...</p>';
+  try {
+    const response = await fetch(`report.json?ts=${Date.now()}`);
+    if (!response.ok) throw new Error("Report unavailable");
+    state.report = await response.json();
+    render();
+  } catch (error) {
+    elements.grid.innerHTML = `<p class="check-detail">${error.message}. Run the audit and place its JSON output at frontend/report.json.</p>`;
+  }
 }
 
 async function analyzeRepository(event) {
@@ -478,10 +230,7 @@ async function analyzeRepository(event) {
     if (!response.ok) throw new Error(start.error || "Could not start analysis");
     const payload = await pollJob(start.job_id);
     state.report = payload;
-    state.activeCheckId = null;
-    state.assistantConversation = [];
     saveHistory(payload, url);
-    renderHistory();
     elements.source.textContent = "source repository";
     elements.updated.textContent = payload.root;
     elements.formStatus.className = "form-status";
@@ -490,7 +239,6 @@ async function analyzeRepository(event) {
     elements.progress.value = 100;
     elements.progressPercent.textContent = "100%";
     render();
-    showAssistantSuggestion();
   } catch (error) {
     elements.formStatus.className = "form-status error";
     elements.formStatus.textContent = error.message;
@@ -514,6 +262,49 @@ async function pollJob(jobId) {
   throw new Error("Analysis timed out after 190 seconds");
 }
 
+async function generateAiInsights() {
+  if (!state.report) {
+    elements.aiHelp.textContent = "Run or open a report first, then generate AI guidance.";
+    return;
+  }
+  elements.aiButton.disabled = true;
+  elements.aiButton.textContent = "Analyzing...";
+  elements.aiHelp.className = "ai-help";
+  elements.aiHelp.textContent = "Asking the AI model to review this report...";
+  try {
+    const response = await fetch("/api/insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report: state.report }),
+    });
+    const start = await response.json();
+    if (!response.ok) throw new Error(start.error || "Could not start AI analysis");
+    const deadline = Date.now() + 65000;
+    let insights = null;
+    while (Date.now() < deadline) {
+      const statusResponse = await fetch(`/api/insights/${start.job_id}?ts=${Date.now()}`);
+      const job = await statusResponse.json();
+      if (!statusResponse.ok) throw new Error(job.error || "AI analysis job unavailable");
+      elements.aiHelp.textContent = job.message;
+      if (job.state === "complete") { insights = job.insights; break; }
+      if (job.state === "error") throw new Error(job.error || job.message || "AI analysis failed");
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+    if (!insights) throw new Error("AI analysis timed out");
+    elements.aiOutput.hidden = false;
+    elements.aiSummary.textContent = insights.summary;
+    elements.aiRecommendations.innerHTML = insights.recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>No specific recommendations.</li>";
+    elements.aiWorkflow.innerHTML = insights.workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong><br>${escapeHtml(step.detail)}</li>`).join("") || "<li>No workflow steps suggested.</li>";
+    elements.aiHelp.textContent = "Generated by the Gemini API from your current report.";
+  } catch (error) {
+    elements.aiHelp.className = "ai-help error";
+    elements.aiHelp.textContent = error.message;
+  } finally {
+    elements.aiButton.disabled = false;
+    elements.aiButton.textContent = "Generate AI guidance";
+  }
+}
+
 document.querySelectorAll(".filter-button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".filter-button").forEach((item) => item.classList.remove("is-active"));
@@ -522,97 +313,7 @@ document.querySelectorAll(".filter-button").forEach((button) => {
     if (state.report) render();
   });
 });
-
-function showAssistantSuggestion() {
-  elements.assistantSuggestion.classList.add("is-visible");
-}
-
-function closeAssistant() {
-  state.assistantOpen = false;
-  elements.assistantPanel.classList.add("is-collapsed");
-  elements.assistantPanel.classList.remove("is-fullscreen");
-  elements.assistantPanel.setAttribute("aria-hidden", "true");
-  elements.assistantBackdrop.hidden = true;
-  document.body.classList.remove("assistant-modal-open");
-  elements.assistantToggle.textContent = "Hide";
-}
-
-function openAssistant() {
-  if (!state.report) return;
-  state.assistantOpen = true;
-  elements.assistantPanel.classList.remove("is-collapsed");
-  elements.assistantPanel.setAttribute("aria-hidden", "false");
-  elements.assistantBackdrop.hidden = false;
-  document.body.classList.add("assistant-modal-open");
-  elements.assistantSuggestion.classList.remove("is-visible");
-  elements.assistantToggle.textContent = "Close";
-  elements.assistantInput.focus();
-}
-
-elements.assistantToggle.addEventListener("click", () => {
-  state.assistantOpen = !state.assistantOpen;
-  if (state.assistantOpen) openAssistant();
-  else closeAssistant();
-});
-
-elements.assistantPanel.addEventListener("dblclick", () => {
-  const next = !elements.assistantPanel.classList.contains("is-fullscreen");
-  elements.assistantPanel.classList.toggle("is-fullscreen", next);
-});
-
-elements.assistantLauncher.addEventListener("click", () => {
-  openAssistant();
-});
-
-elements.assistantBackdrop.addEventListener("click", closeAssistant);
-
-elements.assistantPrompts.forEach((button) => {
-  button.addEventListener("click", () => {
-    elements.assistantPrompts.forEach((item) => item.classList.toggle("is-selected", item === button));
-    const selectedPrompt = button.dataset.prompt;
-    const response = assistantResponse(selectedPrompt);
-    addAssistantMessage("bot", response);
-  });
-});
-
-elements.assistantSuggestions.forEach((button) => {
-  button.addEventListener("click", () => {
-    const selectedPrompt = button.dataset.prompt;
-    const response = assistantResponse(selectedPrompt);
-    addAssistantMessage("user", `Prompt: ${selectedPrompt}`);
-    addAssistantMessage("bot", response);
-  });
-});
-
-elements.assistantSend.addEventListener("click", () => {
-  const value = elements.assistantInput.value.trim();
-  if (!value) return;
-  addAssistantMessage("user", value);
-  elements.assistantInput.value = "";
-  addAssistantMessage("bot", resolveAssistantReply(value));
-});
-
-elements.assistantInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    elements.assistantSend.click();
-  }
-});
-
-elements.detailOverlay.addEventListener("click", (event) => {
-  if (event.target === elements.detailOverlay) {
-    renderDetailWindow(null);
-  }
-});
-elements.closeDetail.addEventListener("click", () => renderDetailWindow(null));
-if (elements.clearHistory) {
-  elements.clearHistory.addEventListener("click", () => {
-    state.history = [];
-    sessionStorage.removeItem(HISTORY_KEY);
-    renderHistory();
-  });
-}
 document.querySelector("#refreshButton").addEventListener("click", loadReport);
 elements.form.addEventListener("submit", analyzeRepository);
-renderHistory();
+elements.aiButton.addEventListener("click", generateAiInsights);
 loadReport();
