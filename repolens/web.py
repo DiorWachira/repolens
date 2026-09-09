@@ -176,6 +176,9 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path in {"", "/"}:
+            self.path = "/index.html"
+            return super().do_GET()
         if parsed.path.startswith("/api/insights/"):
             job_id = parsed.path.rsplit("/", 1)[-1]
             with AI_JOBS_LOCK:
