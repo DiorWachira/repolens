@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
-from repolens import builtin_checks  # noqa: F401  (registers checks)
+from repolens import ai, builtin_checks  # noqa: F401  (registers checks)
 from repolens.checks import REGISTRY, CheckResult, score
 from repolens.repo import Repo
 
@@ -25,6 +25,9 @@ JOB_TIMEOUT_SECONDS = 180
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 JOBS: dict[str, dict[str, object]] = {}
 JOBS_LOCK = threading.Lock()
+AI_JOBS: dict[str, dict[str, object]] = {}
+AI_JOBS_LOCK = threading.Lock()
+AI_JOB_TIMEOUT_SECONDS = 60
 
 
 def github_repo_url(value: str) -> tuple[str, str]:
@@ -135,6 +138,36 @@ def create_job(url: str) -> str:
     return job_id
 
 
+def run_ai_job(job_id: str, report: dict) -> None:
+    started = time.monotonic()
+
+    def update(progress: int, message: str) -> None:
+        if time.monotonic() - started > AI_JOB_TIMEOUT_SECONDS:
+            raise TimeoutError(f"AI analysis timed out after {AI_JOB_TIMEOUT_SECONDS} seconds")
+        with AI_JOBS_LOCK:
+            job = AI_JOBS.get(job_id)
+            if job:
+                job.update({"progress": progress, "message": message})
+
+    try:
+        insights = ai.generate_insights(report, update)
+        with AI_JOBS_LOCK:
+            AI_JOBS[job_id].update({"state": "complete", "progress": 100, "message": "AI analysis complete", "insights": insights})
+    except Exception as error:
+        with AI_JOBS_LOCK:
+            AI_JOBS[job_id].update({"state": "error", "progress": 0, "message": str(error), "error": str(error)})
+
+
+def create_ai_job(report: dict) -> str:
+    if not isinstance(report, dict) or "checks" not in report:
+        raise ValueError("a valid report is required to generate AI insights")
+    job_id = uuid.uuid4().hex
+    with AI_JOBS_LOCK:
+        AI_JOBS[job_id] = {"state": "running", "progress": 5, "message": "Starting AI analysis"}
+    threading.Thread(target=run_ai_job, args=(job_id, report), daemon=True).start()
+    return job_id
+
+
 class ReportHandler(SimpleHTTPRequestHandler):
     """Serve the dashboard and one URL-driven report endpoint."""
 
@@ -143,6 +176,16 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path in {"", "/"}:
+            self.path = "/index.html"
+            return super().do_GET()
+        if parsed.path.startswith("/api/insights/"):
+            job_id = parsed.path.rsplit("/", 1)[-1]
+            with AI_JOBS_LOCK:
+                job = AI_JOBS.get(job_id)
+            if not job:
+                return self._send_json(HTTPStatus.NOT_FOUND, {"error": "AI analysis job not found"})
+            return self._send_json(HTTPStatus.OK, job)
         if parsed.path.startswith("/api/report/"):
             job_id = parsed.path.rsplit("/", 1)[-1]
             with JOBS_LOCK:
@@ -162,14 +205,26 @@ class ReportHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/report":
-            return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", "0"))
         try:
-            body = json.loads(self.rfile.read(length))
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except json.JSONDecodeError as error:
+            return self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
+        if path == "/api/insights":
+            try:
+                job_id = create_ai_job(body.get("report"))
+                return self._send_json(HTTPStatus.ACCEPTED, {"job_id": job_id})
+            except ValueError as error:
+                return self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
+        if path != "/api/report":
+            return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        try:
             job_id = create_job(str(body.get("url", "")))
             self._send_json(HTTPStatus.ACCEPTED, {"job_id": job_id})
-        except (ValueError, json.JSONDecodeError) as error:
+        except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, object]) -> None:

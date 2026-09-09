@@ -88,6 +88,21 @@
           <div class="actions-list" id="actionsList" aria-live="polite"></div>
         </section>
 
+        <section class="history-section" aria-labelledby="historyHeading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">This browser session</p>
+              <h2 id="historyHeading">Saved analyses</h2>
+            </div>
+            <button class="clear-button" id="clearHistory" type="button">Clear history</button>
+          </div>
+          <div class="history-summary-row">
+            <span class="summary-number" id="historyCount">0</span>
+            <span class="history-summary-label">analyzed repos</span>
+          </div>
+          <div class="history-list" id="historyList" aria-live="polite"></div>
+        </section>
+
         <section class="footer-panel">
           <div class="footer-icon">{ }</div>
           <div>
@@ -98,7 +113,91 @@
         </section>
       </main>
 
+      <div class="assistant-backdrop" id="assistantBackdrop" hidden></div>
+      <aside class="assistant-panel is-collapsed" id="assistantPanel" aria-live="polite" aria-hidden="true">
+        <div class="assistant-header">
+          <div class="assistant-brand">
+            <span class="assistant-mark" aria-hidden="true">✦</span>
+            <div>
+              <span class="assistant-kicker">Repo lens</span>
+              <strong>Repository advisor</strong>
+            </div>
+          </div>
+          <button type="button" id="assistantToggle" class="assistant-toggle" aria-label="Collapse advisor panel">Hide</button>
+        </div>
+
+        <div class="assistant-scope">
+          <span class="scope-pill">Repo only</span>
+          <span class="scope-pill muted">No web</span>
+          <span class="scope-pill muted">No shell</span>
+        </div>
+
+        <div class="assistant-status">
+          <div>
+            <span class="assistant-label">Current focus</span>
+            <strong id="assistantFocusLabel">Overall health</strong>
+          </div>
+          <span class="assistant-badge" id="assistantBadge">healthy</span>
+        </div>
+
+        <div class="assistant-prompts" aria-label="Advisor prompts">
+          <button type="button" class="assistant-prompt is-selected" data-prompt="overview">Explain repo health</button>
+          <button type="button" class="assistant-prompt" data-prompt="priority">What should I fix first?</button>
+          <button type="button" class="assistant-prompt" data-prompt="check">Explain this check</button>
+          <button type="button" class="assistant-prompt" data-prompt="plan">Build a fix plan</button>
+          <button type="button" class="assistant-prompt assistant-prompt-ai" data-prompt="ai">Ask the AI model</button>
+        </div>
+
+        <div class="assistant-shell">
+          <aside class="assistant-task-stack" aria-label="Repository task list">
+            <h3>Task stack</h3>
+            <ul id="assistantTaskList" class="assistant-task-list"></ul>
+          </aside>
+
+          <div class="assistant-content">
+            <div class="assistant-chat" id="assistantChat" aria-live="polite"></div>
+            <div class="assistant-suggestions" aria-label="Suggested actions">
+              <button type="button" class="assistant-suggestion" data-prompt="overview">Health</button>
+              <button type="button" class="assistant-suggestion" data-prompt="priority">Priority</button>
+              <button type="button" class="assistant-suggestion" data-prompt="plan">Plan</button>
+              <button type="button" class="assistant-suggestion" data-prompt="check">Check</button>
+            </div>
+            <div class="assistant-input-row">
+              <input id="assistantInput" type="text" placeholder="Ask about this repository..." aria-label="Ask the repository advisor">
+              <button type="button" id="assistantSend">Send</button>
+            </div>
+          </div>
+
+          <aside class="assistant-insight" aria-label="Repository insight panel">
+            <h3>Insight</h3>
+            <div id="assistantInsight" class="assistant-insight-body"></div>
+          </aside>
+        </div>
+      </aside>
+
+      <div class="assistant-launcher-wrap">
+        <span class="assistant-suggestion-bubble" id="assistantSuggestion" aria-hidden="true">Need guidance?</span>
+        <button type="button" class="assistant-launcher" id="assistantLauncher" title="Open repository advisor" aria-label="Open repository advisor">
+          <span aria-hidden="true">✦</span>
+        </button>
+      </div>
       <footer class="site-footer"><span>repolens 0.1.0</span><span>zero dependencies / standard library core</span></footer>
+    </div>
+    <div class="check-detail-overlay" id="checkDetailOverlay" hidden>
+      <div class="check-detail-window" role="dialog" aria-modal="true" aria-labelledby="checkDetailTitle">
+        <div class="check-detail-header">
+          <div class="check-detail-title-wrap">
+            <span class="status-dot pass" id="checkDetailDot" aria-hidden="true"></span>
+            <span class="status-label pass" id="checkDetailStatus">pass</span>
+          </div>
+          <button type="button" class="check-detail-close" id="closeCheckDetail" aria-label="Close details">Close</button>
+        </div>
+        <h3 id="checkDetailTitle">Check title</h3>
+        <p class="check-detail-meta" id="checkDetailMeta">Signal ID: --</p>
+        <p class="check-detail-summary" id="checkDetailSummary">Summary text</p>
+        <div id="checkDetailEvidence" class="check-detail-evidence"></div>
+        <p class="check-detail-guidance" id="checkDetailGuidance">Next: ...</p>
+      </div>
     </div>
     <script src="app.js"></script>
   </body>

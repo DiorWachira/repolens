@@ -81,6 +81,22 @@ python -m repolens.web --port 8000
 
 Open `http://localhost:8000` to explore the current check results. The dashboard also accepts a public GitHub URL and analyzes its repository archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Refresh the page after regenerating the report.
 
+### AI-guided analysis (optional)
+
+The dashboard has a "Generate AI guidance" button that asks an LLM to summarize a report, prioritize recommendations, and propose a remediation workflow. It uses the free-tier [Google Gemini API](https://aistudio.google.com/apikey):
+
+1. Create a free API key at <https://aistudio.google.com/apikey> (no billing required for the free tier).
+2. Set it as an environment variable before starting the server - never commit it or paste it into chat:
+
+   ```powershell
+   $env:GEMINI_API_KEY = "your-key-here"
+   python -m repolens.web --port 8000
+   ```
+
+3. Click **Generate AI guidance** on a report. Without a key set, the button explains how to enable the feature instead of failing silently.
+
+This feature is entirely optional - every other repolens feature works with zero API keys and zero external services.
+
 ### Adding a check
 
 The repo ships an agent skill that encodes the whole workflow — check contract, test fixture pattern, docs update and verification steps. In an agent-enabled editor run:
@@ -100,7 +116,10 @@ repolens/
 │   ├── checks.py          # registry, CheckResult, scoring
 │   ├── builtin_checks.py  # the checks themselves
 │   ├── report.py          # text and JSON rendering
-│   └── cli.py             # argument parsing and exit codes
+│   ├── cli.py             # argument parsing and exit codes
+│   ├── web.py             # browser dashboard server and job APIs
+│   └── ai.py              # optional Gemini-powered analysis and recommendations
+├── frontend/               # dependency-free dashboard, history page, exports
 ├── tests/
 └── .github/
     ├── skills/add-check/  # agent skill for extending the tool
