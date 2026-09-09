@@ -78,6 +78,38 @@ class TestGenerateInsights(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ai.generate_insights({"root": "x", "score": 100, "checks": []})
 
+    def test_generate_insights_retries_on_503_then_succeeds(self) -> None:
+        inner = {"summary": "ok", "recommendations": [], "workflow": []}
+        response_body = json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps(inner)}]}}]}).encode("utf-8")
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return response_body
+
+        from urllib.error import HTTPError
+        busy = HTTPError("url", 503, "busy", {}, mock.MagicMock(read=lambda: b'{"error": "busy"}'))
+
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=True):
+            with mock.patch("repolens.ai.urlopen", side_effect=[busy, FakeResponse()]):
+                with mock.patch("repolens.ai.time.sleep"):
+                    result = ai.generate_insights({"root": "x", "score": 100, "checks": []})
+        self.assertEqual(result["summary"], "ok")
+
+    def test_generate_insights_raises_after_exhausting_retries(self) -> None:
+        from urllib.error import HTTPError
+        busy = HTTPError("url", 503, "busy", {}, mock.MagicMock(read=lambda: b'{"error": "busy"}'))
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=True):
+            with mock.patch("repolens.ai.urlopen", side_effect=[busy, busy, busy]):
+                with mock.patch("repolens.ai.time.sleep"):
+                    with self.assertRaises(RuntimeError):
+                        ai.generate_insights({"root": "x", "score": 100, "checks": []})
+
 
 if __name__ == "__main__":
     unittest.main()

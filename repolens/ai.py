@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_MODEL = "gemini-flash-latest"
 API_TIMEOUT_SECONDS = 45
 MAX_LOCATIONS_PER_CHECK = 6
+RETRYABLE_STATUS_CODES = {429, 500, 503}
+RETRYABLE_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 2
 
 RESPONSE_SCHEMA = {
     "type": "object",
@@ -111,14 +115,24 @@ def generate_insights(report: dict, update=None) -> dict:
 
     if update:
         update(45, "Waiting for the AI model to respond")
-    try:
-        with urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")[:300]
-        raise RuntimeError(f"Gemini API error {error.code}: {detail}") from error
-    except URLError as error:
-        raise RuntimeError(f"could not reach the Gemini API: {error.reason}") from error
+
+    payload = None
+    last_error: Exception | None = None
+    for attempt in range(RETRYABLE_ATTEMPTS):
+        try:
+            with urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:300]
+            last_error = RuntimeError(f"Gemini API error {error.code}: {detail}")
+            if error.code not in RETRYABLE_STATUS_CODES or attempt == RETRYABLE_ATTEMPTS - 1:
+                raise last_error from error
+            if update:
+                update(45, f"Model is busy, retrying ({attempt + 1}/{RETRYABLE_ATTEMPTS - 1})...")
+            time.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+        except URLError as error:
+            raise RuntimeError(f"could not reach the Gemini API: {error.reason}") from error
 
     if update:
         update(85, "Formatting recommendations")
