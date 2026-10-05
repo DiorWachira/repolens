@@ -9,7 +9,7 @@ from repolens import ai
 
 class TestApiKey(unittest.TestCase):
     def test_missing_key_raises_clear_error(self) -> None:
-        with mock.patch.dict("os.environ", {}, clear=True):
+        with mock.patch.dict("os.environ", {}, clear=True), mock.patch("repolens.ai.saved_api_key", return_value=""):
             with self.assertRaisesRegex(ValueError, "GEMINI_API_KEY"):
                 ai.api_key()
 
@@ -74,7 +74,7 @@ class TestGenerateInsights(unittest.TestCase):
         self.assertEqual(result["summary"], "ok")
 
     def test_generate_insights_requires_api_key(self) -> None:
-        with mock.patch.dict("os.environ", {}, clear=True):
+        with mock.patch.dict("os.environ", {}, clear=True), mock.patch("repolens.ai.saved_api_key", return_value=""):
             with self.assertRaises(ValueError):
                 ai.generate_insights({"root": "x", "score": 100, "checks": []})
 
@@ -109,6 +109,51 @@ class TestGenerateInsights(unittest.TestCase):
                 with mock.patch("repolens.ai.time.sleep"):
                     with self.assertRaises(RuntimeError):
                         ai.generate_insights({"root": "x", "score": 100, "checks": []})
+
+
+class TestAdvisorContract(unittest.TestCase):
+    def test_default_and_override_model_selection(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps({"summary": "ok", "recommendations": [], "workflow": []})}]}}]}).encode()
+        for configured, expected in (("", "gemini-3.1-flash-lite"), ("   ", "gemini-3.1-flash-lite"), ("gemini-custom", "gemini-custom")):
+            with self.subTest(configured=configured), mock.patch.dict("os.environ", {"GEMINI_MODEL": configured}, clear=True), mock.patch("repolens.ai.api_key", return_value="test-key"), mock.patch("repolens.ai.urlopen", return_value=response) as opened:
+                ai.generate_insights({"root": "demo", "score": 100, "checks": []})
+            self.assertEqual(opened.call_args.args[0].full_url, f"https://generativelanguage.googleapis.com/v1beta/models/{expected}:generateContent")
+
+    def test_saved_key_fallback(self):
+        with mock.patch.dict("os.environ", {}, clear=True), mock.patch("repolens.ai.saved_api_key", return_value="saved-key"):
+            self.assertEqual(ai.api_key(), "saved-key")
+
+    def test_question_and_context_in_prompt(self):
+        prompt = ai.build_prompt({"root": "demo", "score": 50, "checks": []}, "Why no tests?", [{"role": "user", "text": "Help me prioritize"}])
+        self.assertIn("Why no tests?", prompt)
+        self.assertIn("Help me prioritize", prompt)
+
+    def test_invalid_requests(self):
+        for report in (None, {}, {"checks": "bad"}, {"root": "x", "score": 50, "checks": [{}]}):
+            with self.subTest(report=report), self.assertRaises(ValueError):
+                ai.validate_request(report)
+
+    def test_invalid_response_types(self):
+        for inner in ({"summary": []}, {"summary": "ok", "recommendations": "bad", "workflow": []}, {"summary": "ok", "recommendations": [], "workflow": [{}]}):
+            with self.subTest(inner=inner), self.assertRaises(RuntimeError):
+                ai.parse_response({"candidates": [{"content": {"parts": [{"text": json.dumps(inner)}]}}]})
+
+    def test_key_in_header_not_url_and_question_sent(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({"candidates": [{"content": {"parts": [{"text": json.dumps({"summary": "ok", "recommendations": [], "workflow": []})}]}}]}).encode()
+        with mock.patch("repolens.ai.api_key", return_value="private-value"), mock.patch("repolens.ai.urlopen", return_value=response) as opened:
+            ai.generate_insights({"root": "x", "score": 100, "checks": []}, question="What next?")
+        request = opened.call_args.args[0]
+        self.assertNotIn("private-value", request.full_url)
+        self.assertEqual(request.get_header("X-goog-api-key"), "private-value")
+        self.assertIn("What next?", request.data.decode())
+
+    def test_network_errors_do_not_leak_credentials(self):
+        with mock.patch("repolens.ai.api_key", return_value="private-value"), mock.patch("repolens.ai.urlopen", side_effect=TimeoutError("private-value")):
+            with self.assertRaisesRegex(RuntimeError, "Check your connection") as caught:
+                ai.generate_insights({"root": "x", "score": 100, "checks": []})
+        self.assertNotIn("private-value", str(caught.exception))
 
 
 if __name__ == "__main__":

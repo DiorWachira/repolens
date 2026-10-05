@@ -1,6 +1,10 @@
 const HISTORY_KEY = "repolens-session-history";
 const state = { report: null, filter: "all", history: loadHistory(), activeCheckId: null, assistantOpen: false };
 state.assistantConversation = [];
+state.aiController = null;
+state.insights = null;
+state.lastQuestion = "Summarize the health report and create a prioritized fix plan.";
+state.aiTimeout = 120;
 
 const elements = {
   score: document.querySelector("#scoreValue"),
@@ -90,9 +94,10 @@ function renderHistory() {
     open.className = "history-open";
     open.type = "button";
     open.title = "Open this report";
+    open.setAttribute("aria-label", "Open this report");
     open.textContent = "->";
     open.addEventListener("click", () => {
-      state.report = entry.report;
+      selectReport(entry.report);
       elements.source.textContent = "source repository";
       elements.updated.textContent = entry.report.root.replace("github.com/", "");
       elements.formStatus.className = "form-status";
@@ -217,7 +222,7 @@ function explainCheck(check) {
 }
 
 function prioritizeCheck(report) {
-  const warnings = report.checks.filter((check) => check.status !== "pass");
+  const warnings = prioritizedChecks(report);
   if (!warnings.length) {
     return "The repo looks healthy overall. Prioritize maintenance work: keep docs fresh, review TODOs periodically, and maintain CI coverage as the project grows.";
   }
@@ -226,7 +231,7 @@ function prioritizeCheck(report) {
 }
 
 function buildPlan(report) {
-  const actionable = report.checks.filter((check) => check.status !== "pass");
+  const actionable = prioritizedChecks(report);
   if (!actionable.length) {
     return "The repo is in a strong place. Keep the plan simple: maintain docs, preserve CI, and monitor TODO churn as the codebase evolves.";
   }
@@ -272,7 +277,7 @@ function resolveAssistantReply(rawText) {
 
 function buildAssistantTasks(report) {
   if (!report) return [];
-  const actionable = report.checks.filter((check) => check.status !== "pass");
+  const actionable = prioritizedChecks(report);
   if (!actionable.length) {
     return [
       { label: "Maintain the current health baseline", detail: "Keep CI, docs, and test coverage in sync." },
@@ -291,8 +296,9 @@ function renderAssistantChat() {
   const conversation = state.assistantConversation.length ? state.assistantConversation : [{ role: "bot", text: "Repository analysis is ready. Select a check or ask for a repo-focused recommendation." }];
   elements.assistantChat.innerHTML = conversation.map((message) => `
     <div class="assistant-message assistant-message-${message.role}">
-      <p class="assistant-message-label">${message.role === "bot" ? "Advisor" : "You"}</p>
+      <p class="assistant-message-label">${message.role === "bot" ? (message.source || "Local guide") : "You"}</p>
       <p>${escapeHtml(message.text)}</p>
+      ${message.insights ? `<h4>Recommendations</h4><ul>${message.insights.recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><h4>Remediation workflow</h4><ol class="workflow-list">${message.insights.workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong><p>${escapeHtml(step.detail)}</p></li>`).join("")}</ol>` : ""}
     </div>
   `).join("");
   elements.assistantChat.scrollTop = elements.assistantChat.scrollHeight;
@@ -346,47 +352,106 @@ function addAssistantMessage(role, text) {
   renderAssistantChat();
 }
 
-async function requestAiGuidance() {
+function selectReport(report) {
+  state.aiController?.abort();
+  state.report = report;
+  state.activeCheckId = null;
+  state.assistantConversation = [];
+  state.insights = null;
+  document.querySelector("#exportWorkflow").disabled = true;
+}
+
+function setAdvisorBusy(busy) {
+  elements.assistantSend.disabled = busy;
+  elements.assistantInput.disabled = busy;
+  [...elements.assistantPrompts, ...elements.assistantSuggestions].forEach((button) => { button.disabled = busy; });
+  document.querySelector("#cancelAi").hidden = !busy;
+  document.querySelector("#retryAi").hidden = true;
+  document.querySelector("#advisorMode").disabled = busy;
+  elements.assistantChat.setAttribute("aria-busy", String(busy));
+}
+
+async function refreshAiStatus() {
+  const status = document.querySelector("#aiConnection");
+  try {
+    const response = await fetch("/api/ai/status", { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error("Server unavailable");
+    const config = await response.json();
+    state.aiTimeout = config.timeout_seconds || 120;
+    status.textContent = config.configured ? "Gemini configured" : "API key required";
+    status.title = config.message;
+    status.dataset.ready = String(config.configured);
+  } catch {
+    status.textContent = "Server unavailable";
+    status.dataset.ready = "false";
+  }
+}
+
+async function requestAiGuidance(question = state.lastQuestion) {
+  if (state.aiController) return;
   if (!state.report) {
     addAssistantMessage("bot", "Start with a repository scan to get an AI-guided analysis.");
     return;
   }
-  addAssistantMessage("user", "Ask the AI model for a guided analysis");
-  addAssistantMessage("bot", "Asking the Gemini API to review this report...");
-  const loadingIndex = state.assistantConversation.length - 1;
+  const report = state.report;
+  const history = state.assistantConversation.filter((message) => !message.error).slice(-6).map(({ role, text, insights }) => ({ role, text: (insights ? JSON.stringify(insights) : text).slice(0, 8000) }));
+  state.lastQuestion = question;
+  addAssistantMessage("user", question);
+  const pending = { role: "bot", source: "Gemini", text: "Preparing repository context..." };
+  state.assistantConversation.push(pending);
+  renderAssistantChat();
+  const controller = new AbortController();
+  state.aiController = controller;
+  const timeout = setTimeout(() => controller.abort("timeout"), (state.aiTimeout + 10) * 1000);
+  setAdvisorBusy(true);
   try {
     const startResponse = await fetch("/api/insights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ report: state.report }),
+      body: JSON.stringify({ report, question: state.activeCheckId ? `${question}\nSelected check: ${state.activeCheckId}` : question, history }),
+      signal: controller.signal,
     });
     const start = await startResponse.json();
     if (!startResponse.ok) throw new Error(start.error || "Could not start AI analysis");
 
-    const deadline = Date.now() + 65000;
+    const deadline = Date.now() + (state.aiTimeout + 5) * 1000;
     let insights = null;
     while (Date.now() < deadline) {
-      const statusResponse = await fetch(`/api/insights/${start.job_id}?ts=${Date.now()}`);
+      const statusResponse = await fetch(`/api/insights/${start.job_id}?ts=${Date.now()}`, { signal: controller.signal });
       const job = await statusResponse.json();
       if (!statusResponse.ok) throw new Error(job.error || "AI analysis job unavailable");
       if (job.state === "complete") { insights = job.insights; break; }
       if (job.state === "error") throw new Error(job.error || job.message || "AI analysis failed");
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      pending.text = `${job.message} (${job.progress}%)`;
+      renderAssistantChat();
+      await new Promise((resolve) => setTimeout(resolve, 800));
     }
     if (!insights) throw new Error("AI analysis timed out");
 
-    const recommendations = insights.recommendations.length
-      ? insights.recommendations.map((item) => `- ${item}`).join("\n")
-      : "- No specific recommendations.";
-    const workflow = insights.workflow.length
-      ? insights.workflow.map((step, index) => `${index + 1}. ${step.title}: ${step.detail}`).join("\n")
-      : "1. No workflow steps suggested.";
-    const text = `${insights.summary}\n\nRecommendations:\n${recommendations}\n\nSuggested workflow:\n${workflow}`;
-    state.assistantConversation[loadingIndex] = { role: "bot", text };
+    if (state.report !== report || controller.signal.aborted) return;
+    pending.text = insights.summary;
+    pending.insights = insights;
+    state.insights = insights;
+    document.querySelector("#exportWorkflow").disabled = false;
     renderAssistantChat();
   } catch (error) {
-    state.assistantConversation[loadingIndex] = { role: "bot", text: error.message };
-    renderAssistantChat();
+    pending.error = true;
+    pending.text = controller.signal.aborted ? (controller.signal.reason === "timeout" ? "The advisor timed out. Retry when ready." : "Request cancelled. The server may finish the request already sent.") : error.message;
+    if (state.report === report) renderAssistantChat();
+  } finally {
+    clearTimeout(timeout);
+    state.aiController = null;
+    setAdvisorBusy(false);
+    document.querySelector("#retryAi").hidden = !pending.error || state.report !== report;
+  }
+}
+
+function askAdvisor(question) {
+  if (document.querySelector("#advisorMode").value === "local") {
+    addAssistantMessage("user", question);
+    addAssistantMessage("bot", resolveAssistantReply(question));
+  } else {
+    requestAiGuidance(question);
   }
 }
 
@@ -432,6 +497,11 @@ function renderEmptyState(message = "Paste a public GitHub URL above to run your
   renderAssistant();
 }
 
+function prioritizedChecks(report) {
+  const priority = (check) => check.id === "secrets" && check.status === "fail" ? 0 : check.status === "fail" ? 1 : 2;
+  return report.checks.filter((check) => check.status !== "pass").sort((first, second) => priority(first) - priority(second));
+}
+
 function render() {
   const { report } = state;
   const counts = report.checks.reduce((result, check) => {
@@ -453,13 +523,13 @@ function render() {
   elements.grid.innerHTML = checks.map((check, index) => `
     <article class="check-card" data-check-id="${check.id}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(check.title)}" style="animation-delay: ${index * 55}ms">
       <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
-      <div><h3>${check.title}</h3><p class="check-detail">${escapeHtml(check.detail)}</p></div>
+      <div><h3>${escapeHtml(check.title)}</h3><p class="check-detail">${escapeHtml(check.detail)}</p></div>
       <div class="check-card-footer">
         <span class="check-id">${check.id}</span>
         <span class="check-open-label">Open details</span>
       </div>
     </article>
-  `).join("");
+  `).join("") || '<p class="empty-dashboard-state">No checks match this filter.</p>';
 
   elements.grid.querySelectorAll(".check-card").forEach((card) => {
     const handleOpen = () => {
@@ -467,6 +537,7 @@ function render() {
       const selected = report.checks.find((check) => check.id === state.activeCheckId);
       renderDetailWindow(selected);
       renderAssistant();
+      elements.closeDetail.focus();
     };
     card.addEventListener("click", handleOpen);
     card.addEventListener("keydown", (event) => {
@@ -477,7 +548,7 @@ function render() {
     });
   });
 
-  if (state.activeCheckId) {
+  if (state.activeCheckId && !elements.detailOverlay.hidden) {
     const selected = report.checks.find((check) => check.id === state.activeCheckId);
     renderDetailWindow(selected);
   } else {
@@ -486,26 +557,30 @@ function render() {
 
   renderAssistant();
 
-  const actions = report.checks.filter((check) => check.status !== "pass");
+  const actions = prioritizedChecks(report);
   elements.actionCount.textContent = actions.length ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "clear";
   elements.actionsList.innerHTML = actions.length ? actions.map((check) => `
     <article class="action-item">
       <span class="status-dot ${check.status}"></span>
-      <strong class="action-title">${check.title}</strong>
-      <p class="action-copy"><strong>${escapeHtml(check.detail)}</strong><br>${FIX_GUIDANCE[check.id][check.status]}${evidenceMarkup(check)}</p>
+      <strong class="action-title">${escapeHtml(check.title)}</strong>
+      <div class="action-copy"><strong>${escapeHtml(check.detail)}</strong><br>${FIX_GUIDANCE[check.id][check.status]}${evidenceMarkup(check)}</div>
     </article>
   `).join("") : '<p class="all-clear">All checks are passing. There is nothing urgent to fix.</p>';
 }
 
 async function loadReport() {
-  state.report = null;
-  renderEmptyState();
+  if (state.report) render();
+  else renderEmptyState();
+  refreshAiStatus();
 }
 
 async function analyzeRepository(event) {
   event.preventDefault();
   const url = elements.input.value.trim();
   if (!url) return;
+  const submit = elements.form.querySelector("button[type=submit]");
+  if (submit.disabled) return;
+  submit.disabled = true;
   elements.formStatus.className = "form-status loading";
   elements.formStatus.textContent = "The server will update this bar as each phase completes.";
   elements.progressWrap.hidden = false;
@@ -521,9 +596,7 @@ async function analyzeRepository(event) {
     const start = await response.json();
     if (!response.ok) throw new Error(start.error || "Could not start analysis");
     const payload = await pollJob(start.job_id);
-    state.report = payload;
-    state.activeCheckId = null;
-    state.assistantConversation = [];
+    selectReport(payload);
     saveHistory(payload, url);
     renderHistory();
     elements.source.textContent = "source repository";
@@ -539,6 +612,8 @@ async function analyzeRepository(event) {
     elements.formStatus.className = "form-status error";
     elements.formStatus.textContent = error.message;
     elements.progressWrap.hidden = true;
+  } finally {
+    submit.disabled = false;
   }
 }
 
@@ -578,18 +653,17 @@ function closeAssistant() {
   elements.assistantPanel.setAttribute("aria-hidden", "true");
   elements.assistantBackdrop.hidden = true;
   document.body.classList.remove("assistant-modal-open");
-  elements.assistantToggle.textContent = "Hide";
+  elements.assistantLauncher.focus();
 }
 
 function openAssistant() {
-  if (!state.report) return;
   state.assistantOpen = true;
   elements.assistantPanel.classList.remove("is-collapsed");
   elements.assistantPanel.setAttribute("aria-hidden", "false");
   elements.assistantBackdrop.hidden = false;
   document.body.classList.add("assistant-modal-open");
   elements.assistantSuggestion.classList.remove("is-visible");
-  elements.assistantToggle.textContent = "Close";
+  refreshAiStatus();
   elements.assistantInput.focus();
 }
 
@@ -597,11 +671,6 @@ elements.assistantToggle.addEventListener("click", () => {
   state.assistantOpen = !state.assistantOpen;
   if (state.assistantOpen) openAssistant();
   else closeAssistant();
-});
-
-elements.assistantPanel.addEventListener("dblclick", () => {
-  const next = !elements.assistantPanel.classList.contains("is-fullscreen");
-  elements.assistantPanel.classList.toggle("is-fullscreen", next);
 });
 
 elements.assistantLauncher.addEventListener("click", () => {
@@ -615,35 +684,63 @@ elements.assistantPrompts.forEach((button) => {
     elements.assistantPrompts.forEach((item) => item.classList.toggle("is-selected", item === button));
     const selectedPrompt = button.dataset.prompt;
     if (selectedPrompt === "ai") {
-      requestAiGuidance();
+      askAdvisor("Summarize the health report and create a prioritized fix plan.");
       return;
     }
-    const response = assistantResponse(selectedPrompt);
-    addAssistantMessage("bot", response);
+    askAdvisor(button.textContent.trim());
   });
 });
 
 elements.assistantSuggestions.forEach((button) => {
   button.addEventListener("click", () => {
-    const selectedPrompt = button.dataset.prompt;
-    const response = assistantResponse(selectedPrompt);
-    addAssistantMessage("user", `Prompt: ${selectedPrompt}`);
-    addAssistantMessage("bot", response);
+    const questions = { overview: "Explain the repository health", priority: "What should I fix first?", plan: "Build a fix plan", check: "Explain the selected check" };
+    askAdvisor(questions[button.dataset.prompt]);
   });
 });
 
 elements.assistantSend.addEventListener("click", () => {
   const value = elements.assistantInput.value.trim();
   if (!value) return;
-  addAssistantMessage("user", value);
   elements.assistantInput.value = "";
-  addAssistantMessage("bot", resolveAssistantReply(value));
+  askAdvisor(value);
 });
 
 elements.assistantInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     elements.assistantSend.click();
+  }
+});
+
+document.querySelector("#cancelAi").addEventListener("click", () => state.aiController?.abort());
+document.querySelector("#askAboutCheck").addEventListener("click", () => {
+  elements.detailOverlay.hidden = true;
+  openAssistant();
+  elements.assistantInput.value = `How should I resolve the ${state.activeCheckId} finding?`;
+});
+document.querySelector("#retryAi").addEventListener("click", () => requestAiGuidance());
+document.querySelector("#exportWorkflow").addEventListener("click", () => {
+  if (!state.insights || !state.report) return;
+  const { summary, recommendations, workflow } = state.insights;
+  const text = [`# Remediation plan: ${state.report.root}`, "", summary, "", "## Recommendations", ...recommendations.map((item) => `- ${item}`), "", "## Workflow", ...workflow.map((step) => `- [ ] ${step.title}\n  ${step.detail}`), "", "AI-generated guidance. Review before applying changes."].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  link.download = "repolens-remediation.md";
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+document.addEventListener("keydown", (event) => {
+  const modal = state.assistantOpen ? elements.assistantPanel : !elements.detailOverlay.hidden ? elements.detailOverlay : null;
+  if (!modal) return;
+  if (event.key === "Escape") {
+    if (state.assistantOpen) closeAssistant();
+    else renderDetailWindow(null);
+  }
+  if (event.key === "Tab") {
+    const focusable = [...modal.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]")].filter((item) => item.getClientRects().length);
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
 });
 

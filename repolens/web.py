@@ -27,7 +27,8 @@ JOBS: dict[str, dict[str, object]] = {}
 JOBS_LOCK = threading.Lock()
 AI_JOBS: dict[str, dict[str, object]] = {}
 AI_JOBS_LOCK = threading.Lock()
-AI_JOB_TIMEOUT_SECONDS = 60
+AI_JOB_TIMEOUT_SECONDS = ai.AI_TIMEOUT_SECONDS
+MAX_REQUEST_BYTES = 200_000
 
 
 def github_repo_url(value: str) -> tuple[str, str]:
@@ -138,33 +139,48 @@ def create_job(url: str) -> str:
     return job_id
 
 
-def run_ai_job(job_id: str, report: dict) -> None:
+def run_ai_job(job_id: str, report: dict, question: str = "", history: list | None = None) -> None:
     started = time.monotonic()
+
+    def expire() -> None:
+        with AI_JOBS_LOCK:
+            job = AI_JOBS.get(job_id)
+            if job and job["state"] == "running":
+                job.update({"state": "error", "error": "AI analysis timed out. Please retry.", "message": "AI analysis timed out. Please retry."})
+
+    timer = threading.Timer(AI_JOB_TIMEOUT_SECONDS, expire)
+    timer.daemon = True
+    timer.start()
 
     def update(progress: int, message: str) -> None:
         if time.monotonic() - started > AI_JOB_TIMEOUT_SECONDS:
             raise TimeoutError(f"AI analysis timed out after {AI_JOB_TIMEOUT_SECONDS} seconds")
         with AI_JOBS_LOCK:
             job = AI_JOBS.get(job_id)
-            if job:
+            if job and job["state"] == "running":
                 job.update({"progress": progress, "message": message})
 
     try:
-        insights = ai.generate_insights(report, update)
+        insights = ai.generate_insights(report, update, question=question, history=history)
         with AI_JOBS_LOCK:
-            AI_JOBS[job_id].update({"state": "complete", "progress": 100, "message": "AI analysis complete", "insights": insights})
+            if AI_JOBS[job_id]["state"] == "running":
+                AI_JOBS[job_id].update({"state": "complete", "progress": 100, "message": "AI analysis complete", "insights": insights})
     except Exception as error:
         with AI_JOBS_LOCK:
-            AI_JOBS[job_id].update({"state": "error", "progress": 0, "message": str(error), "error": str(error)})
+            if AI_JOBS[job_id]["state"] == "running":
+                message = str(error) if isinstance(error, (ValueError, RuntimeError, TimeoutError)) else "AI analysis failed. Please retry."
+                AI_JOBS[job_id].update({"state": "error", "progress": 0, "message": message, "error": message})
+    finally:
+        timer.cancel()
 
 
-def create_ai_job(report: dict) -> str:
-    if not isinstance(report, dict) or "checks" not in report:
-        raise ValueError("a valid report is required to generate AI insights")
+def create_ai_job(report: dict, question: str = "", history: list | None = None) -> str:
+    ai.validate_request(report, question, history)
+    ai.api_key()
     job_id = uuid.uuid4().hex
     with AI_JOBS_LOCK:
         AI_JOBS[job_id] = {"state": "running", "progress": 5, "message": "Starting AI analysis"}
-    threading.Thread(target=run_ai_job, args=(job_id, report), daemon=True).start()
+    threading.Thread(target=run_ai_job, args=(job_id, report, question, history), daemon=True).start()
     return job_id
 
 
@@ -176,6 +192,12 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/ai/status":
+            try:
+                ai.api_key()
+                return self._send_json(HTTPStatus.OK, {"configured": True, "message": "Gemini configured", "timeout_seconds": AI_JOB_TIMEOUT_SECONDS})
+            except ValueError as error:
+                return self._send_json(HTTPStatus.OK, {"configured": False, "message": str(error), "timeout_seconds": AI_JOB_TIMEOUT_SECONDS})
         if parsed.path in {"", "/"}:
             self.path = "/index.html"
             return super().do_GET()
@@ -206,15 +228,19 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length", "0"))
         try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > MAX_REQUEST_BYTES:
+                return self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "Request body is too large."})
             body = json.loads(self.rfile.read(length)) if length else {}
-        except json.JSONDecodeError as error:
-            return self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            if not isinstance(body, dict):
+                raise ValueError("Expected a JSON object.")
+        except (ValueError, UnicodeDecodeError):
+            return self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Expected a valid JSON object."})
 
         if path == "/api/insights":
             try:
-                job_id = create_ai_job(body.get("report"))
+                job_id = create_ai_job(body.get("report"), body.get("question", ""), body.get("history"))
                 return self._send_json(HTTPStatus.ACCEPTED, {"job_id": job_id})
             except ValueError as error:
                 return self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

@@ -22,7 +22,7 @@ const elements = {
   pdf: document.querySelector("#pdfButton"),
 };
 
-function history() {
+function loadHistory() {
   try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; }
 }
 
@@ -71,7 +71,7 @@ function selectReport(entry) {
 }
 
 function renderHistory() {
-  const entries = history();
+  const entries = loadHistory();
   elements.summary.textContent = `${entries.length} saved scan${entries.length === 1 ? "" : "s"}`;
   elements.list.innerHTML = entries.length ? entries.map((entry) => `<article class="history-page-item"><div><strong>${escapeHtml(entry.report.root.replace("github.com/", ""))}</strong><span>${new Date(entry.scannedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</span></div><b>${entry.report.score}</b><button class="history-select" data-id="${entry.id}" type="button">Open report</button></article>`).join("") : '<p class="history-empty">No scans saved in this browser session yet. Analyze a GitHub repository from the dashboard first.</p>';
   elements.list.querySelectorAll(".history-select").forEach((button) => button.addEventListener("click", () => {

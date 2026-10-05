@@ -72,20 +72,19 @@ python -m repolens .
 
 ### Frontend dashboard
 
-The project includes a dependency-free browser dashboard for the JSON report:
+The project includes a browser dashboard served by the standard-library web server:
 
 ```bash
-python -m repolens . --json > frontend/report.json
 python -m repolens.web --port 8000
 ```
 
-Open `http://localhost:8000` to explore the current check results. The dashboard also accepts a public GitHub URL and analyzes its repository archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Refresh the page after regenerating the report.
+Open `http://127.0.0.1:8000` and enter a public GitHub repository URL. The server downloads and analyzes its archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Local folders are audited through the CLI; the dashboard does not automatically load CLI output. Scan history stays in browser session storage. Fonts and icons load from external CDNs.
 
 ### AI-guided analysis (optional)
 
-The dashboard has a "Generate AI guidance" button that asks an LLM to summarize a report, prioritize recommendations, and propose a remediation workflow. It uses the free-tier [Google Gemini API](https://aistudio.google.com/apikey):
+The repository advisor sends questions, selected-check context, and recent conversation to the [Google Gemini API](https://aistudio.google.com/apikey). It returns a direct answer, recommendations, and a remediation workflow. API access, quotas, and pricing depend on your Google project and model:
 
-1. Create a free API key at <https://aistudio.google.com/apikey> (no billing required for the free tier).
+1. Create an API key at <https://aistudio.google.com/apikey> and check the project's model access and quota.
 2. Set it as an environment variable before starting the server - never commit it or paste it into chat:
 
    ```powershell
@@ -93,7 +92,13 @@ The dashboard has a "Generate AI guidance" button that asks an LLM to summarize 
    python -m repolens.web --port 8000
    ```
 
-3. Click **Generate AI guidance** on a report. Without a key set, the button explains how to enable the feature instead of failing silently.
+3. Open **Repository advisor**, select **Gemini**, and send a question or choose a prompt. Check details also have an **Ask advisor** action. **Export plan** downloads the latest successful response as a Markdown checklist.
+
+On Windows, the server also checks the saved current-user `GEMINI_API_KEY` environment value when the process environment has no key. This handles VS Code sessions started before the user variable was saved. A nonempty process variable takes precedence; replace it or restart the parent application if it contains an old key. No credential is returned to the browser or added to request URLs.
+
+The configuration indicator only confirms that a key is present, not that Google will accept it. The default model is `gemini-3.1-flash-lite`, verified with structured advisor requests. Set `GEMINI_MODEL` to use another available model. The `gemini-flash-latest` alias can route to a high-demand model and repeatedly return HTTP 503 even when the key works with Flash-Lite. If you previously set that override, remove it to use the default and restart the server. Authentication errors, unavailable models, quota limits, connection failures, and provider outages appear in the conversation with a retry action. AI jobs expire after 120 seconds; cancelling in the browser stops waiting but cannot retract an API request already sent.
+
+Select **Local guide** for deterministic, offline guidance instead of a model request. Gemini requests are explicit: the report and up to six recent conversation messages are sent to Google. Do not enter secrets. Generated guidance is advisory, may be incorrect, and never executes commands or edits a repository.
 
 This feature is entirely optional - every other repolens feature works with zero API keys and zero external services.
 
