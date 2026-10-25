@@ -268,6 +268,19 @@ class ReportHandler(SimpleHTTPRequestHandler):
         except ValueError as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
+    def send_error(self, code, message=None, explain=None) -> None:
+        """Serve the designed 404 page for missing frontend files; API errors stay JSON."""
+        page = FRONTEND_DIR / "404.html"
+        if code != HTTPStatus.NOT_FOUND or self.path.startswith("/api/") or not page.is_file():
+            return super().send_error(code, message, explain)
+        body = page.read_bytes()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def _send_json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status)

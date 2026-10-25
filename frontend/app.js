@@ -1,420 +1,400 @@
-const HISTORY_KEY = "repolens-session-history";
-const state = { report: null, filter: "all", history: loadHistory(), activeCheckId: null, assistantOpen: false };
-state.assistantConversation = [];
-state.aiController = null;
-state.insights = null;
-state.lastQuestion = "Summarize the health report and create a prioritized fix plan.";
-state.aiTimeout = 120;
+// Dashboard: run an examination, render the record, chart lines and prescription,
+// and hold a consultation with the examiner (Gemini or offline).
 
-const elements = {
-  score: document.querySelector("#scoreValue"),
-  scoreRing: document.querySelector("#scoreRing"),
-  scoreNote: document.querySelector("#scoreNote"),
-  pass: document.querySelector("#passCount"),
-  warn: document.querySelector("#warnCount"),
-  fail: document.querySelector("#failCount"),
-  updated: document.querySelector("#updatedAt"),
-  source: document.querySelector("#sourceLabel"),
-  form: document.querySelector("#repoForm"),
-  input: document.querySelector("#repoUrl"),
-  formStatus: document.querySelector("#formStatus"),
-  progressWrap: document.querySelector("#progressWrap"),
-  progress: document.querySelector("#analysisProgress"),
-  progressMessage: document.querySelector("#progressMessage"),
-  progressPercent: document.querySelector("#progressPercent"),
-  grid: document.querySelector("#checksGrid"),
-  detailOverlay: document.querySelector("#checkDetailOverlay"),
-  detailTitle: document.querySelector("#checkDetailTitle"),
-  detailStatus: document.querySelector("#checkDetailStatus"),
-  detailDot: document.querySelector("#checkDetailDot"),
-  detailSummary: document.querySelector("#checkDetailSummary"),
-  detailGuidance: document.querySelector("#checkDetailGuidance"),
-  detailMeta: document.querySelector("#checkDetailMeta"),
-  detailEvidence: document.querySelector("#checkDetailEvidence"),
-  closeDetail: document.querySelector("#closeCheckDetail"),
-  actionCount: document.querySelector("#actionCount"),
-  actionsList: document.querySelector("#actionsList"),
-  historyCount: document.querySelector("#historyCount"),
-  historyList: document.querySelector("#historyList"),
-  clearHistory: document.querySelector("#clearHistory"),
-  assistantPanel: document.querySelector("#assistantPanel"),
-  assistantBackdrop: document.querySelector("#assistantBackdrop"),
-  assistantToggle: document.querySelector("#assistantToggle"),
-  assistantLauncher: document.querySelector("#assistantLauncher"),
-  assistantSuggestion: document.querySelector("#assistantSuggestion"),
-  assistantFocusLabel: document.querySelector("#assistantFocusLabel"),
-  assistantBadge: document.querySelector("#assistantBadge"),
-  assistantPrompts: document.querySelectorAll(".assistant-prompt"),
-  assistantChat: document.querySelector("#assistantChat"),
-  assistantTaskList: document.querySelector("#assistantTaskList"),
-  assistantInsight: document.querySelector("#assistantInsight"),
-  assistantInput: document.querySelector("#assistantInput"),
-  assistantSend: document.querySelector("#assistantSend"),
-  assistantSuggestions: document.querySelectorAll(".assistant-suggestion"),
+const CHART = [
+  { logmar: 1.0, letters: "R" },
+  { logmar: 0.8, letters: "EP" },
+  { logmar: 0.6, letters: "OLE" },
+  { logmar: 0.4, letters: "NSRE" },
+  { logmar: 0.3, letters: "POLEN" },
+  { logmar: 0.2, letters: "SREPO" },
+  { logmar: 0.1, letters: "LENSR" },
+  { logmar: 0.0, letters: "EPOLS" },
+];
+const CHART_BASE_PX = 13;
+const DEFAULT_QUESTION = "Give me an initial review of this report and a prioritized fix plan.";
+
+const state = {
+  report: null,
+  scannedAt: null,
+  filter: "all",
+  history: loadHistory(),
+  activeCheckId: null,
+  conversation: [],
+  controller: null,
+  insights: null,
+  lastQuestion: DEFAULT_QUESTION,
+  aiTimeout: 120,
+  aiReady: false,
 };
 
-function loadHistory() {
-  try {
-    return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]");
-  } catch {
-    return [];
+const $ = (selector) => document.querySelector(selector);
+const elements = {
+  form: $("#repoForm"),
+  input: $("#repoUrl"),
+  submit: $("#repoForm button[type=submit]"),
+  formStatus: $("#formStatus"),
+  progressWrap: $("#progressWrap"),
+  progress: $("#analysisProgress"),
+  progressMessage: $("#progressMessage"),
+  progressPercent: $("#progressPercent"),
+  targetBars: $("#targetBars"),
+  chartRows: $("#chartRows"),
+  chartCaption: $("#chartCaption"),
+  record: $("#record"),
+  lines: $("#lines"),
+  rxSection: $("#rxSection"),
+  grid: $("#checksGrid"),
+  actionsList: $("#actionsList"),
+  historyList: $("#historyList"),
+  detail: $("#checkDetail"),
+  panel: $("#assistantPanel"),
+  launcher: $("#assistantLauncher"),
+  chat: $("#assistantChat"),
+  input2: $("#assistantInput"),
+  send: $("#assistantSend"),
+  connection: $("#aiConnection"),
+  focus: $("#assistantFocus"),
+  focusLabel: $("#assistantFocusLabel"),
+  retry: $("#retryAi"),
+  cancel: $("#cancelAi"),
+  exportPlan: $("#exportWorkflow"),
+};
+
+const mode = () => document.querySelector("input[name=advisorMode]:checked").value;
+const activeCheck = () => state.report?.checks.find((check) => check.id === state.activeCheckId) || null;
+
+// --- Acuity chart ---------------------------------------------------------
+
+function renderChart() {
+  const reached = state.report ? acuity(state.report.score).logmar : null;
+  elements.chartRows.innerHTML = CHART.map((row) => {
+    const size = CHART_BASE_PX * 10 ** row.logmar;
+    // Lines finer than the repository's acuity are out of focus, more so the further below.
+    const blur = reached === null || row.logmar >= reached - 0.001 ? 0 : Math.min(6, (reached - row.logmar) * 14 * (size / 20) ** 0.3);
+    const isLine = reached !== null && Math.abs(row.logmar - reached) < 0.001;
+    return `<li class="chart-row${isLine ? " is-reached" : ""}" style="--k:${(10 ** row.logmar).toFixed(3)};--blur:${blur.toFixed(2)}px">
+      <span class="chart-logmar">${row.logmar.toFixed(1)}</span>
+      <span class="chart-letters" aria-hidden="true">${row.letters.split("").join(" ")}</span>
+      <span class="chart-snellen">20/${SNELLEN[Math.round(row.logmar * 10)]}</span>
+    </li>`;
+  }).join("");
+  if (state.report) {
+    const sight = acuity(state.report.score);
+    elements.chartCaption.innerHTML = `<strong>${escapeHtml(repoName(state.report))}</strong> reads to the <strong>${sight.snellen}</strong> line: ${sight.verdict.toLowerCase()}.`;
   }
 }
 
-function saveHistory(report, url) {
-  const entry = { id: `${Date.now()}`, url, report, scannedAt: new Date().toISOString() };
-  state.history = [entry, ...state.history.filter((item) => item.url !== url)].slice(0, 12);
-  sessionStorage.setItem(HISTORY_KEY, JSON.stringify(state.history));
+// --- USAF-1951 style progress target: six elements of three bars, each finer --
+
+function renderTarget(progress) {
+  if (!elements.targetBars.childElementCount) {
+    elements.targetBars.innerHTML = Array.from({ length: 6 }, (_, index) => `<span class="element" style="--scale:${(1 - index * 0.13).toFixed(2)}"><i></i><i></i><i></i></span>`).join("");
+  }
+  const lit = Math.floor((progress / 100) * 6 + 0.0001);
+  [...elements.targetBars.children].forEach((element, index) => element.classList.toggle("is-lit", index < lit));
+  elements.progress.value = progress;
+  elements.progressPercent.textContent = `${progress}%`;
 }
+
+// --- Record, lines, prescription -----------------------------------------
+
+function renderRecord() {
+  const { report } = state;
+  const tally = counts(report);
+  const sight = acuity(report.score);
+  $("#scoreValue").textContent = report.score;
+  $("#acuityValue").textContent = sight.snellen;
+  $("#logmarValue").textContent = sight.logmar.toFixed(1);
+  $("#verdictValue").textContent = sight.verdict;
+  $("#passCount").textContent = tally.pass;
+  $("#warnCount").textContent = tally.warn;
+  $("#failCount").textContent = tally.fail;
+  $("#patchStrip").innerHTML = patchStrip(report);
+  $("#recordSource").textContent = `Examined ${formatDate(state.scannedAt)}`;
+  $("#specimenName").textContent = repoName(report);
+  $("#specimenLink").href = `https://${report.root}`;
+  const profile = report.profile || {};
+  const rows = [];
+  if (Number.isInteger(profile.files)) rows.push(["Files read", profile.files.toLocaleString()]);
+  if (profile.languages?.length) rows.push(["Mostly", profile.languages.slice(0, 3).map((item) => `${item.ext} ×${item.count}`).join(" · ")]);
+  if (profile.top_level?.length) rows.push(["Top level", `${profile.top_level.length} entries`]);
+  $("#specimenMeta").innerHTML = rows.map(([term, value]) => `<div><dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+}
+
+function renderLines() {
+  const { report } = state;
+  const visible = report.checks.map((check, index) => ({ check, index })).filter(({ check }) => state.filter === "all" || check.status === state.filter);
+  elements.grid.innerHTML = visible.map(({ check, index }) => `
+    <li class="line line-${check.status}" style="--delay:${index * 45}ms">
+      <button type="button" class="line-button" data-check-id="${escapeHtml(check.id)}" aria-haspopup="dialog">
+        <span class="line-no">${String(index + 1).padStart(2, "0")}</span>
+        <span class="line-optotype" aria-hidden="true">${escapeHtml(check.id[0].toUpperCase())}</span>
+        <span class="line-text"><strong>${escapeHtml(check.title)}</strong><span>${escapeHtml(check.detail.split("; locations:")[0].split("; affected:")[0])}</span></span>
+        <span class="line-id">${escapeHtml(check.id)}</span>
+        ${statusMark(check.status)}
+        <span class="line-open" aria-hidden="true"><svg><use href="#i-arrow"/></svg></span>
+      </button>
+    </li>`).join("") || '<li class="empty">No lines match this filter.</li>';
+}
+
+function renderPrescription() {
+  elements.actionsList.innerHTML = prescription(state.report, state.scannedAt);
+}
+
+function renderSectionNumbers() {
+  const hasReport = Boolean(state.report);
+  $("#casesNo").textContent = hasReport ? "§ 04" : "§ 01";
+  $("#methodNo").textContent = hasReport ? "§ 05" : "§ 02";
+}
+
+function render() {
+  const hasReport = Boolean(state.report);
+  [elements.record, elements.lines, elements.rxSection].forEach((section) => { section.hidden = !hasReport; });
+  renderChart();
+  renderSectionNumbers();
+  if (hasReport) {
+    renderRecord();
+    renderLines();
+    renderPrescription();
+  }
+  renderExaminer();
+}
+
+function renderMethod() {
+  const titles = { readme: "README present and substantial", license: "LICENSE declared", gitignore: "Ignore file configured", tests: "Automated tests exist", ci: "Continuous integration configured", todos: "Unresolved TODO markers", "large-files": "No oversized files committed", secrets: "No hardcoded secrets" };
+  $("#methodLines").innerHTML = Object.entries(CATALOGUE).map(([id, entry], index) => `
+    <li><span class="line-no">${String(index + 1).padStart(2, "0")}</span><span class="method-optotype" aria-hidden="true">${id[0].toUpperCase()}</span><div><strong>${titles[id]}</strong> <code>${id}</code><p>${escapeHtml(entry.measures)}</p></div></li>`).join("");
+}
+
+// --- Case files -------------------------------------------------------------
 
 function renderHistory() {
-  if (elements.historyCount) {
-    elements.historyCount.textContent = String(state.history.length);
-  }
-  if (!elements.historyList) return;
   if (!state.history.length) {
-    elements.historyList.innerHTML = '<p class="history-empty">No scans saved in this browser session yet.</p>';
+    elements.historyList.innerHTML = '<li class="empty">No examinations yet this session. Results stay in this browser tab only.</li>';
+    $("#clearHistory").hidden = true;
     return;
   }
-  elements.historyList.innerHTML = "";
-  state.history.forEach((entry) => {
-    const item = document.createElement("article");
-    item.className = "history-item";
-    const repo = document.createElement("div");
-    repo.className = "history-repo";
-    const title = document.createElement("strong");
-    title.textContent = entry.report.root.replace("github.com/", "");
-    const date = document.createElement("span");
-    date.textContent = new Date(entry.scannedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-    repo.append(title, date);
-    const score = document.createElement("span");
-    score.className = "history-score";
-    score.textContent = `${entry.report.score}`;
-    const open = document.createElement("button");
-    open.className = "history-open";
-    open.type = "button";
-    open.title = "Open this report";
-    open.setAttribute("aria-label", "Open this report");
-    open.textContent = "->";
-    open.addEventListener("click", () => {
-      selectReport(entry.report);
-      elements.source.textContent = "source repository";
-      elements.updated.textContent = entry.report.root.replace("github.com/", "");
-      elements.formStatus.className = "form-status";
-      elements.formStatus.textContent = "Showing a saved scan from this session.";
-      render();
-      document.querySelector("#actionsHeading").scrollIntoView({ behavior: "smooth" });
-    });
-    const actions = document.createElement("div");
-    actions.className = "history-actions";
-    const markdown = document.createElement("button");
-    markdown.className = "history-export";
-    markdown.type = "button";
-    markdown.textContent = "MD";
-    markdown.title = "Download Markdown report";
-    markdown.addEventListener("click", () => exportMarkdown(entry.report));
-    const pdf = document.createElement("button");
-    pdf.className = "history-export";
-    pdf.type = "button";
-    pdf.textContent = "PDF";
-    pdf.title = "Print or save as PDF";
-    pdf.addEventListener("click", () => exportPdf(entry.report));
-    actions.append(markdown, pdf, open);
-    item.append(repo, score, actions);
-    elements.historyList.append(item);
-  });
+  $("#clearHistory").hidden = false;
+  elements.historyList.innerHTML = state.history.map((entry) => `
+    <li class="case">
+      <button type="button" class="case-button" data-entry="${escapeHtml(entry.id)}">
+        <span class="case-name">${escapeHtml(repoName(entry.report))}</span>
+        <span class="case-date">${escapeHtml(formatDate(entry.scannedAt, { dateStyle: "short", timeStyle: "short" }))}</span>
+        ${patchStrip(entry.report, { compact: true })}
+        <span class="case-acuity">${acuity(entry.report.score).snellen}</span>
+        <span class="case-score">${entry.report.score}</span>
+      </button>
+    </li>`).join("");
 }
 
-const FIX_GUIDANCE = {
-  readme: {
-    pass: "Keep the root README current as the project changes.",
-    warn: "Expand the root README to at least 300 characters with setup, usage, and development details.",
-    fail: "Add a README.md, README.rst, or README.txt at the repository root with setup and usage instructions.",
-  },
-  license: { pass: "No action needed.", warn: "Add a LICENSE or COPYING file. Choose a license, save its official text at the repository root, and mention it in the README." },
-  gitignore: { pass: "No action needed.", warn: "Add a .gitignore covering generated files, environments, caches, and local secrets. Remove already-tracked artifacts with git rm --cached." },
-  tests: { pass: "No action needed.", fail: "Add automated tests in a tests directory or recognized test files. Run them in CI so regressions block merges." },
-  ci: { pass: "No action needed.", warn: "Add a workflow under .github/workflows that installs dependencies, runs tests, and reports failures on pull requests." },
-  todos: { pass: "No action needed.", warn: "Review each TODO, FIXME, HACK, and XXX. Fix completed work, convert real follow-ups into tracked issues, and keep the marker count at 10 or fewer." },
-  "large-files": { pass: "No action needed.", warn: "Remove large generated/media files from git history or move them to release storage or Git LFS. Add an ignore rule, then verify with git ls-files." },
-  secrets: { pass: "No action needed.", fail: "For every listed location: remove the literal, rotate/revoke the exposed credential, replace it with an environment variable or secret manager reference, then scan git history." },
-};
+// --- Examination --------------------------------------------------------------
 
-function reportMarkdown(report) {
-  const lines = [`# repolens report: ${report.root}`, "", `**Health:** ${report.score}/100`, "", "## Checks", ""];
-  report.checks.forEach((check) => {
-    lines.push(`### ${check.status.toUpperCase()} - ${check.title}`, "", `- ID: \`${check.id}\``, `- Detail: ${check.detail}`, ...(check.locations || []).map((location) => `- Location: ${location}`), `- Guidance: ${FIX_GUIDANCE[check.id][check.status]}`, "");
-  });
-  lines.push("## What to fix next", "");
-  const actions = report.checks.filter((check) => check.status !== "pass");
-  if (!actions.length) lines.push("All checks are passing. There is nothing urgent to fix.");
-  actions.forEach((check) => lines.push(`- **${check.title}:** ${check.detail}\n  ${FIX_GUIDANCE[check.id][check.status]}`));
-  return lines.join("\n");
+function selectReport(report, scannedAt = new Date().toISOString()) {
+  state.controller?.abort();
+  state.report = report;
+  state.scannedAt = scannedAt;
+  state.activeCheckId = null;
+  state.conversation = [];
+  state.insights = null;
+  elements.exportPlan.disabled = true;
+  render();
 }
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;",
-  }[character]));
+function setStatus(message, tone = "") {
+  elements.formStatus.className = `form-status${tone ? ` is-${tone}` : ""}`;
+  elements.formStatus.textContent = message;
 }
 
-function evidenceMarkup(check) {
-  if (!check.locations || !check.locations.length) return "";
-  return `<details class="evidence"><summary>Show ${check.locations.length} affected location${check.locations.length === 1 ? "" : "s"}</summary><ul>${check.locations.map((location) => `<li><code>${escapeHtml(location)}</code></li>`).join("")}</ul></details>`;
+async function pollJob(jobId) {
+  const deadline = Date.now() + 190000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`/api/report/${jobId}?ts=${Date.now()}`);
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || "Examination job unavailable");
+    renderTarget(job.progress);
+    elements.progressMessage.textContent = job.message;
+    if (job.state === "complete") return job.report;
+    if (job.state === "error") throw new Error(job.error || job.message || "Examination failed");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+  }
+  throw new Error("The examination timed out after 190 seconds");
 }
 
-function exportMarkdown(report) {
-  const name = report.root.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "repolens-report";
-  const blob = new Blob([reportMarkdown(report)], { type: "text/markdown;charset=utf-8" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `${name}-report.md`;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-function exportPdf(report) {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
-  const checks = report.checks.map((check) => `<li><strong>${escapeHtml(check.status.toUpperCase())} - ${escapeHtml(check.title)}</strong><br>${escapeHtml(check.detail)}${check.locations?.length ? `<ul>${check.locations.map((location) => `<li><code>${escapeHtml(location)}</code></li>`).join("")}</ul>` : ""}<br><em>${escapeHtml(FIX_GUIDANCE[check.id][check.status])}</em></li>`).join("");
-  printWindow.document.write(`<title>repolens report - ${escapeHtml(report.root)}</title><style>body{font:14px Arial;max-width:800px;margin:40px auto;color:#16201d}h1{font-size:28px}h2{border-bottom:1px solid #ccc;padding-bottom:8px}li{margin:12px 0;line-height:1.5}</style><h1>repolens report</h1><p><strong>Repository:</strong> ${escapeHtml(report.root)}<br><strong>Health:</strong> ${escapeHtml(report.score)}/100</p><h2>Checks</h2><ul>${checks}</ul>`);
-  printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
-}
-
-function statusLabel(status) {
-  return status === "pass" ? "healthy" : status === "warn" ? "advisory" : "blocking";
-}
-
-function renderDetailWindow(check) {
-  if (!check) {
-    elements.detailOverlay.hidden = true;
-    state.activeCheckId = null;
+async function analyzeRepository(event) {
+  event.preventDefault();
+  const url = elements.input.value.trim();
+  if (!url) {
+    setStatus("Paste a public GitHub repository URL first.", "error");
+    elements.input.focus();
     return;
   }
-
-  elements.detailOverlay.hidden = false;
-  elements.detailTitle.textContent = check.title;
-  elements.detailStatus.textContent = statusLabel(check.status);
-  elements.detailStatus.className = `status-label ${check.status}`;
-  elements.detailDot.className = `status-dot ${check.status}`;
-  elements.detailSummary.textContent = check.detail;
-  elements.detailGuidance.textContent = `${check.status === "pass" ? "Next:" : "Fix:"} ${FIX_GUIDANCE[check.id][check.status]}`;
-  elements.detailMeta.textContent = `Signal ID: ${check.id}`;
-
-  if (check.locations && check.locations.length) {
-    elements.detailEvidence.innerHTML = `
-      <div class="detail-evidence-wrap">
-        <strong>Evidence</strong>
-        <ul>${check.locations.map((location) => `<li>${escapeHtml(location)}</li>`).join("")}</ul>
-      </div>
-    `;
-  } else {
-    elements.detailEvidence.innerHTML = '<p class="detail-empty">No issue-specific locations were reported for this check.</p>';
+  if (elements.submit.disabled) return;
+  elements.submit.disabled = true;
+  elements.input.setAttribute("aria-busy", "true");
+  setStatus("Examining. Each phase reports as it completes.", "loading");
+  elements.progressWrap.hidden = false;
+  elements.progressMessage.textContent = "Starting examination";
+  renderTarget(2);
+  try {
+    const response = await fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+    const start = await response.json();
+    if (!response.ok) throw new Error(start.error || "Could not start the examination");
+    const report = await pollJob(start.job_id);
+    renderTarget(100);
+    elements.progressMessage.textContent = "Examination complete";
+    state.history = saveToHistory(report, url);
+    selectReport(report);
+    renderHistory();
+    setStatus(`Examined ${repoName(report)}. The record is below.`);
+    elements.record.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    elements.launcher.classList.add("is-inviting");
+  } catch (error) {
+    setStatus(error.message.replace(/^./, (character) => character.toUpperCase()), "error");
+    elements.progressWrap.hidden = true;
+  } finally {
+    elements.submit.disabled = false;
+    elements.input.removeAttribute("aria-busy");
   }
 }
 
-function explainCheck(check) {
-  const focus = check ? `${check.title} (${check.status})` : "overall repository health";
-  const advisory = check ? `${FIX_GUIDANCE[check.id][check.status]}` : "The report is currently healthy overall, but the assistant is tuned to highlight the next risk and explain which checks matter most.";
-  return `This repo is focused on ${focus}. The signal says: ${check ? check.detail : "the report is broadly healthy"}. The repo-only guidance is to ${advisory}`;
+// --- Inspection slip ----------------------------------------------------------
+
+function openDetail(checkId) {
+  const index = state.report.checks.findIndex((check) => check.id === checkId);
+  const check = state.report.checks[index];
+  if (!check) return;
+  state.activeCheckId = check.id;
+  $("#checkDetailMeta").textContent = `Line ${String(index + 1).padStart(2, "0")} · ${check.id}`;
+  $("#checkDetailOptotype").textContent = check.id[0].toUpperCase();
+  $("#checkDetailOptotype").className = `slip-optotype optotype-${check.status}`;
+  $("#checkDetailTitle").textContent = check.title;
+  $("#checkDetailStatus").innerHTML = statusMark(check.status);
+  $("#checkDetailSummary").textContent = check.detail.split("; locations:")[0].split("; affected:")[0];
+  $("#checkDetailEvidenceRow").hidden = !check.locations?.length;
+  $("#checkDetailEvidence").innerHTML = evidenceList(check);
+  $("#checkDetailMeasures").textContent = CATALOGUE[check.id]?.measures || "";
+  $("#checkDetailGuidance").textContent = guidanceFor(check);
+  $("#checkDetailVerify").textContent = CATALOGUE[check.id]?.verify || "";
+  elements.detail.showModal();
+  renderExaminer();
 }
 
-function prioritizeCheck(report) {
-  const warnings = prioritizedChecks(report);
-  if (!warnings.length) {
-    return "The repo looks healthy overall. Prioritize maintenance work: keep docs fresh, review TODOs periodically, and maintain CI coverage as the project grows.";
-  }
-  const first = warnings[0];
-  return `The highest-priority issue is ${first.title}. It is currently marked as ${first.status}, with the summary: ${first.detail}. The recommended next move is to address the root cause first, then verify the rest of the repo remains stable.`;
-}
+// --- The examiner ---------------------------------------------------------------
 
-function buildPlan(report) {
-  const actionable = prioritizedChecks(report);
-  if (!actionable.length) {
-    return "The repo is in a strong place. Keep the plan simple: maintain docs, preserve CI, and monitor TODO churn as the codebase evolves.";
-  }
-  return actionable.slice(0, 3).map((check) => `- ${check.title}: ${FIX_GUIDANCE[check.id][check.status]}`).join(" ");
-}
-
-function assistantResponse(prompt) {
-  if (!state.report) {
-    return "Start with a repository scan to get repo-focused guidance.";
-  }
-
+// Offline mode: deterministic answers from the report alone, in the same shape as Gemini's.
+function offlineAnswer(question) {
   const report = state.report;
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-
-  switch (prompt) {
-    case "overview":
-      return `Overall health is ${report.score}/100. ${report.checks.filter((item) => item.status === "pass").length} checks are clear, ${report.checks.filter((item) => item.status === "warn").length} are advisory, and ${report.checks.filter((item) => item.status === "fail").length} need action. This is a repo-only summary that stays within the current health evidence.`;
-    case "priority":
-      return prioritizeCheck(report);
-    case "check":
-      return explainCheck(active);
-    case "plan":
-      return buildPlan(report);
-    default:
-      return "The repo advisor is scoped to repository health, not general-purpose chat.";
-  }
-}
-
-function resolveAssistantReply(rawText) {
-  const text = String(rawText || "").trim().toLowerCase();
-  if (!text) return "Ask about repo health, the most important fix, or explain a specific check.";
-  if (!state.report) return "Start with a repository scan to get repo-focused guidance.";
-
-  if (/(health|overview|summary|status)/.test(text)) return assistantResponse("overview");
-  if (/(first|priority|urgent|next|most important)/.test(text)) return assistantResponse("priority");
-  if (/(plan|fix|roadmap|next steps|what should i do)/.test(text)) return assistantResponse("plan");
-  if (/(check|why|explain|detail)/.test(text)) return assistantResponse("check");
-
-  const active = state.report.checks.find((item) => item.id === state.activeCheckId) || null;
-  if (active) return explainCheck(active);
-  return `I can help reason about ${state.report.root}. The repo-only scope is to explain health signals, prioritize fixes, and suggest the next evidence-backed step.`;
-}
-
-function buildAssistantTasks(report) {
-  if (!report) return [];
+  const text = question.toLowerCase();
+  const focus = activeCheck();
   const actionable = prioritizedChecks(report);
-  if (!actionable.length) {
-    return [
-      { label: "Maintain the current health baseline", detail: "Keep CI, docs, and test coverage in sync." },
-      { label: "Review TODO drift", detail: "Mitigate growing maintenance debt before it becomes risk." },
-    ];
+  const plan = () => actionable.map((check) => ({ title: check.title, detail: guidanceFor(check), verify: CATALOGUE[check.id]?.verify || "" }));
+  if (/(plan|steps|roadmap|review|fix plan)/.test(text)) {
+    return {
+      answer: actionable.length ? `**${repoName(report)}** reads ${acuity(report.score).snellen} with ${actionable.length} line${actionable.length === 1 ? "" : "s"} to correct. Work through them in this order; exposed credentials always come first.` : `**${repoName(report)}** reads 20/20. There is nothing to correct; keep documentation, tests and CI current.`,
+      recommendations: [], workflow: plan(), follow_ups: actionable.length ? [`How do I resolve the ${actionable[0].id} finding?`] : [],
+    };
   }
-
-  return actionable.slice(0, 4).map((check) => ({
-    label: check.title,
-    detail: FIX_GUIDANCE[check.id]?.[check.status] || check.detail,
-  }));
-}
-
-function renderAssistantChat() {
-  if (!elements.assistantChat) return;
-  const conversation = state.assistantConversation.length ? state.assistantConversation : [{ role: "bot", text: "Repository analysis is ready. Select a check or ask for a repo-focused recommendation." }];
-  elements.assistantChat.innerHTML = conversation.map((message) => `
-    <div class="assistant-message assistant-message-${message.role}">
-      <p class="assistant-message-label">${message.role === "bot" ? (message.source || "Local guide") : "You"}</p>
-      <p>${escapeHtml(message.text)}</p>
-      ${message.insights?.recommendations.length ? `<h4>Recommendations</h4><ul>${message.insights.recommendations.map((item) => `<li>${escapeHtml(item.text)}${item.checks.length ? ` <code>${item.checks.map(escapeHtml).join(", ")}</code>` : ""}</li>`).join("")}</ul>` : ""}
-      ${message.insights?.workflow.length ? `<h4>Remediation workflow</h4><ol class="workflow-list">${message.insights.workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong><p>${escapeHtml(step.detail)}</p>${step.verify ? `<p><em>Verify:</em> ${escapeHtml(step.verify)}</p>` : ""}</li>`).join("")}</ol>` : ""}
-      ${message.insights?.follow_ups.length ? `<div class="assistant-suggestions">${message.insights.follow_ups.map((question) => `<button type="button" class="assistant-suggestion" data-follow-up="${escapeHtml(question)}">${escapeHtml(question)}</button>`).join("")}</div>` : ""}
-    </div>
-  `).join("");
-  elements.assistantChat.querySelectorAll("[data-follow-up]").forEach((button) => button.addEventListener("click", () => askAdvisor(button.dataset.followUp)));
-  elements.assistantChat.scrollTop = elements.assistantChat.scrollHeight;
+  if (focus && /(this|check|line|explain|resolve|fix)/.test(text)) {
+    return {
+      answer: `\`${focus.id}\` is **${STATUS[focus.status].label.toLowerCase()}**: ${focus.detail.split("; locations:")[0]}.\n\n${CATALOGUE[focus.id].measures}\n\n${guidanceFor(focus)}\n\nVerify with:\n\n\`\`\`\n${CATALOGUE[focus.id].verify}\n\`\`\``,
+      recommendations: [], workflow: [], follow_ups: ["Build a fix plan for the whole report"],
+    };
+  }
+  if (/(first|priority|urgent|next|most important)/.test(text)) {
+    const first = actionable[0];
+    return {
+      answer: first ? `Start with \`${first.id}\`, **${first.title.toLowerCase()}**: ${first.detail.split("; locations:")[0]}. ${guidanceFor(first)}` : "Nothing is urgent. Every line reads clearly.",
+      recommendations: [], workflow: [], follow_ups: first ? [`How do I verify the ${first.id} fix?`, "Build a fix plan for the whole report"] : [],
+    };
+  }
+  const tally = counts(report);
+  return {
+    answer: `Offline mode answers from the report only. **${repoName(report)}** scores ${report.score}/100 (${acuity(report.score).snellen}): ${tally.pass} clear, ${tally.warn} advisory, ${tally.fail} blocking. Ask for a plan, what to fix first, or open a line and ask about it. Switch to Gemini for free-form questions.`,
+    recommendations: [], workflow: [], follow_ups: ["What should I fix first?", "Build a fix plan"],
+  };
 }
 
 // Earlier answers are replayed as plain text with numbered steps, so follow-ups like "explain step two" resolve.
 function messageAsText({ text, insights }) {
   if (!insights) return text;
-  const steps = insights.workflow.map((step, index) => `Step ${index + 1}: ${step.title} - ${step.detail}`);
   const recommendations = insights.recommendations.map((item) => `- ${item.text}`);
+  const steps = insights.workflow.map((step, index) => `Step ${index + 1}: ${step.title} - ${step.detail}`);
   return [insights.answer, recommendations.length ? `Recommendations:\n${recommendations.join("\n")}` : "", steps.join("\n")].filter(Boolean).join("\n\n");
 }
 
-function renderAssistantInsight(report) {
-  if (!elements.assistantInsight) return;
-  if (!report) {
-    elements.assistantInsight.innerHTML = '<p class="assistant-insight-empty">No repository loaded.</p>';
+function answerMarkup(insights) {
+  const recommendations = insights.recommendations.length ? `<div class="answer-block"><p class="label">Recommendations</p><ul class="answer-recs">${insights.recommendations.map((item) => `<li>${renderMarkdown(item.text).replace(/^<p>|<\/p>$/g, "")}${item.checks.map((id) => ` <code class="tag">${escapeHtml(id)}</code>`).join("")}</li>`).join("")}</ul></div>` : "";
+  const workflow = insights.workflow.length ? `<div class="answer-block"><p class="label">Prescribed steps</p><ol class="answer-steps">${insights.workflow.map((step, index) => `<li><span class="step-no">${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(step.title)}</strong><div class="step-detail">${renderMarkdown(step.detail)}</div>${step.verify ? `<p class="step-verify"><span>Verify</span>${renderMarkdown(step.verify).replace(/^<p>|<\/p>$/g, "")}</p>` : ""}</div></li>`).join("")}</ol></div>` : "";
+  const followUps = insights.follow_ups.length ? `<div class="follow-ups">${insights.follow_ups.map((question) => `<button type="button" class="prompt" data-question="${escapeHtml(question)}">${escapeHtml(question)}</button>`).join("")}</div>` : "";
+  return `<div class="answer">${renderMarkdown(insights.answer)}</div>${recommendations}${workflow}${followUps}`;
+}
+
+function renderTranscript() {
+  if (!state.report) {
+    elements.chat.innerHTML = '<div class="entry entry-note"><p>Examine a repository first. The examiner reads the record it produces.</p></div>';
     return;
   }
-
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-  const summary = active
-    ? `${active.title}: ${active.detail}`
-    : `Overall health score: ${report.score}/100`;
-
-  const focus = active ? active.status : (report.score >= 80 ? "pass" : report.score >= 60 ? "warn" : "fail");
-  const focusText = focus === "pass" ? "Healthy" : focus === "warn" ? "Watch" : focus === "fail" ? "Needs attention" : "Healthy";
-
-  elements.assistantInsight.innerHTML = `
-    <div class="assistant-insight-card ${focus}">
-      <span class="assistant-insight-kicker">Focus</span>
-      <strong>${escapeHtml(focusText)}</strong>
-    </div>
-    <p>${escapeHtml(summary)}</p>
-    <ul>
-      <li>${report.checks.filter((check) => check.status === "pass").length} passing checks</li>
-      <li>${report.checks.filter((check) => check.status === "warn").length} warnings</li>
-      <li>${report.checks.filter((check) => check.status === "fail").length} blockers</li>
-    </ul>
-  `;
+  const opening = `<div class="entry entry-note"><p>Record loaded for <strong>${escapeHtml(repoName(state.report))}</strong>, reading ${acuity(state.report.score).snellen}. Ask for a review, or open a line of the chart and ask about it.</p></div>`;
+  elements.chat.innerHTML = opening + state.conversation.map((message) => {
+    if (message.role === "user") {
+      return `<div class="entry entry-q"><p class="entry-label"><span>Q.</span> ${escapeHtml(message.time)}${message.focus ? ` · on <code>${escapeHtml(message.focus)}</code>` : ""}</p><p class="entry-question">${escapeHtml(message.text)}</p></div>`;
+    }
+    const body = message.pending ? `<p class="entry-pending"><span class="pending-bars" aria-hidden="true"><i></i><i></i><i></i></span>${escapeHtml(message.text)}</p>` : message.error ? `<p class="entry-error">${escapeHtml(message.text)}</p>` : answerMarkup(message.insights);
+    return `<div class="entry entry-a${message.error ? " is-error" : ""}"><p class="entry-label"><span>A.</span> ${escapeHtml(message.source || "Examiner")}</p>${body}</div>`;
+  }).join("");
+  elements.chat.scrollTop = elements.chat.scrollHeight;
 }
 
-function renderAssistantTasks(report) {
-  if (!elements.assistantTaskList) return;
-  const tasks = buildAssistantTasks(report);
-  elements.assistantTaskList.innerHTML = tasks.map((task) => `
-    <li class="assistant-task-item">
-      <strong>${escapeHtml(task.label)}</strong>
-      <span>${escapeHtml(task.detail)}</span>
-    </li>
-  `).join("");
+function renderExaminer() {
+  const focus = activeCheck();
+  elements.focus.hidden = !focus;
+  if (focus) elements.focusLabel.textContent = `${focus.title} (${focus.id})`;
+  renderTranscript();
 }
 
-function addAssistantMessage(role, text) {
-  const normalized = String(text || "").trim();
-  if (!normalized) return;
-  state.assistantConversation.push({ role, text: normalized });
-  state.assistantConversation = state.assistantConversation.slice(-8);
-  renderAssistantChat();
-}
-
-function selectReport(report) {
-  state.aiController?.abort();
-  state.report = report;
-  state.activeCheckId = null;
-  state.assistantConversation = [];
-  state.insights = null;
-  document.querySelector("#exportWorkflow").disabled = true;
-}
-
-function setAdvisorBusy(busy) {
-  elements.assistantSend.disabled = busy;
-  elements.assistantInput.disabled = busy;
-  [...elements.assistantPrompts, ...elements.assistantSuggestions].forEach((button) => { button.disabled = busy; });
-  document.querySelector("#cancelAi").hidden = !busy;
-  document.querySelector("#retryAi").hidden = true;
-  document.querySelector("#advisorMode").disabled = busy;
-  elements.assistantChat.setAttribute("aria-busy", String(busy));
+function setExaminerBusy(busy) {
+  elements.send.disabled = busy;
+  elements.input2.disabled = busy;
+  document.querySelectorAll(".examiner .prompt, input[name=advisorMode]").forEach((control) => { control.disabled = busy; });
+  elements.cancel.hidden = !busy;
+  if (busy) elements.retry.hidden = true;
+  elements.chat.setAttribute("aria-busy", String(busy));
 }
 
 async function refreshAiStatus() {
-  const status = document.querySelector("#aiConnection");
   try {
     const response = await fetch("/api/ai/status", { signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error("Server unavailable");
     const config = await response.json();
     state.aiTimeout = config.timeout_seconds || 120;
-    status.textContent = config.configured ? "Gemini configured" : "API key required";
-    status.title = config.message;
-    status.dataset.ready = String(config.configured);
+    state.aiReady = Boolean(config.configured);
+    elements.connection.textContent = config.configured ? "Gemini ready" : "No API key on server";
+    elements.connection.title = config.message;
   } catch {
-    status.textContent = "Server unavailable";
-    status.dataset.ready = "false";
+    state.aiReady = false;
+    elements.connection.textContent = "Server unavailable";
   }
+  elements.connection.dataset.ready = String(state.aiReady);
+  if (!state.aiReady && mode() === "gemini") document.querySelector("input[name=advisorMode][value=local]").checked = true;
 }
 
-async function requestAiGuidance(question = state.lastQuestion) {
-  if (state.aiController) return;
-  if (!state.report) {
-    addAssistantMessage("bot", "Start with a repository scan to get an AI-guided analysis.");
-    return;
-  }
+function clock() {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+async function askGemini(question) {
   const report = state.report;
-  const history = state.assistantConversation.filter((message) => !message.error).slice(-8).map((message) => ({ role: message.role, text: messageAsText(message).slice(0, 8000) }));
+  const history = state.conversation.filter((message) => !message.error && !message.pending).slice(-8).map((message) => ({ role: message.role, text: messageAsText(message).slice(0, 8000) }));
   state.lastQuestion = question;
-  addAssistantMessage("user", question);
-  const pending = { role: "bot", source: "Gemini", text: "Preparing repository context..." };
-  state.assistantConversation.push(pending);
-  renderAssistantChat();
+  state.conversation.push({ role: "user", text: question, time: clock(), focus: state.activeCheckId });
+  const pending = { role: "bot", source: "Gemini", text: "Reading the record…", pending: true };
+  state.conversation.push(pending);
+  renderTranscript();
   const controller = new AbortController();
-  state.aiController = controller;
+  state.controller = controller;
   const timeout = setTimeout(() => controller.abort("timeout"), (state.aiTimeout + 10) * 1000);
-  setAdvisorBusy(true);
+  setExaminerBusy(true);
   try {
     const startResponse = await fetch("/api/insights", {
       method: "POST",
@@ -423,353 +403,168 @@ async function requestAiGuidance(question = state.lastQuestion) {
       signal: controller.signal,
     });
     const start = await startResponse.json();
-    if (!startResponse.ok) throw new Error(start.error || "Could not start AI analysis");
-
+    if (!startResponse.ok) throw new Error(start.error || "Could not reach the examiner");
     const deadline = Date.now() + (state.aiTimeout + 5) * 1000;
     let insights = null;
     while (Date.now() < deadline) {
       const statusResponse = await fetch(`/api/insights/${start.job_id}?ts=${Date.now()}`, { signal: controller.signal });
       const job = await statusResponse.json();
-      if (!statusResponse.ok) throw new Error(job.error || "AI analysis job unavailable");
+      if (!statusResponse.ok) throw new Error(job.error || "The examiner's job is unavailable");
       if (job.state === "complete") { insights = job.insights; break; }
-      if (job.state === "error") throw new Error(job.error || job.message || "AI analysis failed");
-      pending.text = `${job.message} (${job.progress}%)`;
-      renderAssistantChat();
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (job.state === "error") throw new Error(job.error || job.message || "The examiner could not answer");
+      pending.text = job.message;
+      renderTranscript();
+      await new Promise((resolve) => setTimeout(resolve, 700));
     }
-    if (!insights) throw new Error("AI analysis timed out");
-
+    if (!insights) throw new Error("The examiner timed out");
     if (state.report !== report || controller.signal.aborted) return;
-    pending.text = insights.answer;
-    pending.source = `Gemini · ${insights.model}`;
-    pending.insights = insights;
-    state.insights = insights;
-    document.querySelector("#exportWorkflow").disabled = false;
-    renderAssistantChat();
+    Object.assign(pending, { pending: false, text: insights.answer, source: `Gemini · ${insights.model}`, insights });
+    if (insights.workflow.length) {
+      state.insights = insights;
+      elements.exportPlan.disabled = false;
+    }
   } catch (error) {
-    pending.error = true;
-    pending.text = controller.signal.aborted ? (controller.signal.reason === "timeout" ? "The advisor timed out. Retry when ready." : "Request cancelled. The server may finish the request already sent.") : error.message;
-    if (state.report === report) renderAssistantChat();
+    Object.assign(pending, { pending: false, error: true, text: controller.signal.aborted ? (controller.signal.reason === "timeout" ? "The examiner timed out. Retry when ready." : "Cancelled. A request already sent may still finish on the server.") : error.message });
   } finally {
     clearTimeout(timeout);
-    state.aiController = null;
-    setAdvisorBusy(false);
-    document.querySelector("#retryAi").hidden = !pending.error || state.report !== report;
+    state.controller = null;
+    setExaminerBusy(false);
+    elements.retry.hidden = !pending.error || state.report !== report;
+    if (state.report === report) renderTranscript();
   }
 }
 
-function askAdvisor(question) {
-  if (document.querySelector("#advisorMode").value === "local") {
-    addAssistantMessage("user", question);
-    addAssistantMessage("bot", resolveAssistantReply(question));
-  } else {
-    requestAiGuidance(question);
-  }
-}
-
-function renderAssistant() {
-  const report = state.report;
-  if (!report) {
-    elements.assistantBadge.textContent = "idle";
-    elements.assistantFocusLabel.textContent = "No repo loaded";
-    renderAssistantTasks(null);
-    renderAssistantInsight(null);
-    if (!state.assistantConversation.length) {
-      state.assistantConversation = [{ role: "bot", text: "Start with a repository scan to get repo-focused guidance." }];
-    }
-    renderAssistantChat();
+function askExaminer(question) {
+  question = question.trim();
+  if (!question || state.controller) return;
+  if (!state.report) {
+    renderTranscript();
     return;
   }
-
-  const active = report.checks.find((item) => item.id === state.activeCheckId) || null;
-  const badge = active ? (active.status === "pass" ? "healthy" : active.status === "warn" ? "advisory" : "blocking") : (report.score >= 80 ? "healthy" : report.score >= 60 ? "watch" : "needs work");
-  elements.assistantBadge.textContent = badge;
-  elements.assistantFocusLabel.textContent = active ? active.title : "Overall health";
-  const prompt = document.querySelector(".assistant-prompt.is-selected")?.dataset.prompt || "overview";
-  if (!state.assistantConversation.length) {
-    state.assistantConversation = [{ role: "bot", text: assistantResponse(prompt) }];
-  }
-  renderAssistantTasks(report);
-  renderAssistantInsight(report);
-  renderAssistantChat();
-}
-
-function renderEmptyState(message = "Paste a public GitHub URL above to run your first repository analysis.") {
-  elements.score.textContent = "--";
-  elements.scoreNote.textContent = "Waiting for a repository";
-  elements.pass.textContent = "--";
-  elements.warn.textContent = "--";
-  elements.fail.textContent = "--";
-  elements.updated.textContent = "--";
-  elements.source.textContent = "last scanned";
-  elements.scoreRing.style.background = "none";
-  elements.grid.innerHTML = `<p class="check-detail empty-dashboard-state">${escapeHtml(message)}</p>`;
-  elements.actionCount.textContent = "--";
-  elements.actionsList.innerHTML = '<p class="all-clear empty-dashboard-state">Health actions will appear after the first scan.</p>';
-  renderAssistant();
-}
-
-function prioritizedChecks(report) {
-  const priority = (check) => check.id === "secrets" && check.status === "fail" ? 0 : check.status === "fail" ? 1 : 2;
-  return report.checks.filter((check) => check.status !== "pass").sort((first, second) => priority(first) - priority(second));
-}
-
-function render() {
-  const { report } = state;
-  const counts = report.checks.reduce((result, check) => {
-    result[check.status] += 1;
-    return result;
-  }, { pass: 0, warn: 0, fail: 0 });
-
-  elements.score.textContent = report.score;
-  elements.scoreNote.textContent = `${counts.pass} of ${report.checks.length} signals clear`;
-  elements.pass.textContent = counts.pass;
-  elements.warn.textContent = counts.warn;
-  elements.fail.textContent = counts.fail;
-  elements.updated.textContent = report.root === "repolens"
-    ? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : report.root.replace("github.com/", "");
-  elements.scoreRing.style.background = `conic-gradient(var(--mint) ${report.score}%, rgba(245,242,233,.13) ${report.score}% 100%)`;
-
-  const checks = report.checks.filter((check) => state.filter === "all" || check.status === state.filter);
-  elements.grid.innerHTML = checks.map((check, index) => `
-    <article class="check-card" data-check-id="${check.id}" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(check.title)}" style="animation-delay: ${index * 55}ms">
-      <div class="check-top"><span class="status-dot ${check.status}"></span><span class="status-label ${check.status}">${statusLabel(check.status)}</span></div>
-      <div><h3>${escapeHtml(check.title)}</h3><p class="check-detail">${escapeHtml(check.detail)}</p></div>
-      <div class="check-card-footer">
-        <span class="check-id">${check.id}</span>
-        <span class="check-open-label">Open details</span>
-      </div>
-    </article>
-  `).join("") || '<p class="empty-dashboard-state">No checks match this filter.</p>';
-
-  elements.grid.querySelectorAll(".check-card").forEach((card) => {
-    const handleOpen = () => {
-      state.activeCheckId = card.dataset.checkId;
-      const selected = report.checks.find((check) => check.id === state.activeCheckId);
-      renderDetailWindow(selected);
-      renderAssistant();
-      elements.closeDetail.focus();
-    };
-    card.addEventListener("click", handleOpen);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        handleOpen();
-      }
-    });
-  });
-
-  if (state.activeCheckId && !elements.detailOverlay.hidden) {
-    const selected = report.checks.find((check) => check.id === state.activeCheckId);
-    renderDetailWindow(selected);
-  } else {
-    elements.detailOverlay.hidden = true;
-  }
-
-  renderAssistant();
-
-  const actions = prioritizedChecks(report);
-  elements.actionCount.textContent = actions.length ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "clear";
-  elements.actionsList.innerHTML = actions.length ? actions.map((check) => `
-    <article class="action-item">
-      <span class="status-dot ${check.status}"></span>
-      <strong class="action-title">${escapeHtml(check.title)}</strong>
-      <div class="action-copy"><strong>${escapeHtml(check.detail)}</strong><br>${FIX_GUIDANCE[check.id][check.status]}${evidenceMarkup(check)}</div>
-    </article>
-  `).join("") : '<p class="all-clear">All checks are passing. There is nothing urgent to fix.</p>';
-}
-
-async function loadReport() {
-  if (state.report) render();
-  else renderEmptyState();
-  refreshAiStatus();
-}
-
-async function analyzeRepository(event) {
-  event.preventDefault();
-  const url = elements.input.value.trim();
-  if (!url) return;
-  const submit = elements.form.querySelector("button[type=submit]");
-  if (submit.disabled) return;
-  submit.disabled = true;
-  elements.formStatus.className = "form-status loading";
-  elements.formStatus.textContent = "The server will update this bar as each phase completes.";
-  elements.progressWrap.hidden = false;
-  elements.progress.value = 2;
-  elements.progressPercent.textContent = "2%";
-  elements.progressMessage.textContent = "Starting analysis";
-  try {
-    const response = await fetch("/api/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const start = await response.json();
-    if (!response.ok) throw new Error(start.error || "Could not start analysis");
-    const payload = await pollJob(start.job_id);
-    selectReport(payload);
-    saveHistory(payload, url);
-    renderHistory();
-    elements.source.textContent = "source repository";
-    elements.updated.textContent = payload.root;
-    elements.formStatus.className = "form-status";
-    elements.formStatus.textContent = "Analysis complete. Results below are from the public repository.";
-    elements.progressMessage.textContent = "Analysis complete";
-    elements.progress.value = 100;
-    elements.progressPercent.textContent = "100%";
-    render();
-    showAssistantSuggestion();
-  } catch (error) {
-    elements.formStatus.className = "form-status error";
-    elements.formStatus.textContent = error.message;
-    elements.progressWrap.hidden = true;
-  } finally {
-    submit.disabled = false;
-  }
-}
-
-async function pollJob(jobId) {
-  const deadline = Date.now() + 190000;
-  while (Date.now() < deadline) {
-    const response = await fetch(`/api/report/${jobId}?ts=${Date.now()}`);
-    const job = await response.json();
-    if (!response.ok) throw new Error(job.error || "Analysis job unavailable");
-    elements.progress.value = job.progress;
-    elements.progressPercent.textContent = `${job.progress}%`;
-    elements.progressMessage.textContent = job.message;
-    if (job.state === "complete") return job.report;
-    if (job.state === "error") throw new Error(job.error || job.message || "Analysis failed");
-    await new Promise((resolve) => setTimeout(resolve, 450));
-  }
-  throw new Error("Analysis timed out after 190 seconds");
-}
-
-document.querySelectorAll(".filter-button").forEach((button) => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".filter-button").forEach((item) => item.classList.remove("is-active"));
-    button.classList.add("is-active");
-    state.filter = button.dataset.filter;
-    if (state.report) render();
-  });
-});
-
-function showAssistantSuggestion() {
-  elements.assistantSuggestion.classList.add("is-visible");
-}
-
-function closeAssistant() {
-  state.assistantOpen = false;
-  elements.assistantPanel.classList.add("is-collapsed");
-  elements.assistantPanel.classList.remove("is-fullscreen");
-  elements.assistantPanel.setAttribute("aria-hidden", "true");
-  elements.assistantBackdrop.hidden = true;
-  document.body.classList.remove("assistant-modal-open");
-  elements.assistantLauncher.focus();
-}
-
-function openAssistant() {
-  state.assistantOpen = true;
-  elements.assistantPanel.classList.remove("is-collapsed");
-  elements.assistantPanel.setAttribute("aria-hidden", "false");
-  elements.assistantBackdrop.hidden = false;
-  document.body.classList.add("assistant-modal-open");
-  elements.assistantSuggestion.classList.remove("is-visible");
-  refreshAiStatus();
-  elements.assistantInput.focus();
-}
-
-elements.assistantToggle.addEventListener("click", () => {
-  state.assistantOpen = !state.assistantOpen;
-  if (state.assistantOpen) openAssistant();
-  else closeAssistant();
-});
-
-elements.assistantLauncher.addEventListener("click", () => {
-  openAssistant();
-});
-
-elements.assistantBackdrop.addEventListener("click", closeAssistant);
-
-elements.assistantPrompts.forEach((button) => {
-  button.addEventListener("click", () => {
-    elements.assistantPrompts.forEach((item) => item.classList.toggle("is-selected", item === button));
-    const selectedPrompt = button.dataset.prompt;
-    if (selectedPrompt === "ai") {
-      askAdvisor("Summarize the health report and create a prioritized fix plan.");
-      return;
+  if (mode() === "local") {
+    const insights = offlineAnswer(question);
+    state.conversation.push({ role: "user", text: question, time: clock(), focus: state.activeCheckId });
+    state.conversation.push({ role: "bot", source: "Offline examiner", text: insights.answer, insights });
+    if (insights.workflow.length) {
+      state.insights = insights;
+      elements.exportPlan.disabled = false;
     }
-    askAdvisor(button.textContent.trim());
-  });
-});
-
-elements.assistantSuggestions.forEach((button) => {
-  button.addEventListener("click", () => {
-    const questions = { overview: "Explain the repository health", priority: "What should I fix first?", plan: "Build a fix plan", check: "Explain the selected check" };
-    askAdvisor(questions[button.dataset.prompt]);
-  });
-});
-
-elements.assistantSend.addEventListener("click", () => {
-  const value = elements.assistantInput.value.trim();
-  if (!value) return;
-  elements.assistantInput.value = "";
-  askAdvisor(value);
-});
-
-elements.assistantInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    elements.assistantSend.click();
+    renderTranscript();
+    return;
   }
-});
+  askGemini(question);
+}
 
-document.querySelector("#cancelAi").addEventListener("click", () => state.aiController?.abort());
-document.querySelector("#askAboutCheck").addEventListener("click", () => {
-  elements.detailOverlay.hidden = true;
-  openAssistant();
-  elements.assistantInput.value = `How should I resolve the ${state.activeCheckId} finding?`;
-});
-document.querySelector("#retryAi").addEventListener("click", () => requestAiGuidance());
-document.querySelector("#exportWorkflow").addEventListener("click", () => {
+function openExaminer(prefill = "") {
+  if (elements.detail.open) elements.detail.close();
+  elements.launcher.classList.remove("is-inviting");
+  renderExaminer();
+  if (!elements.panel.open) elements.panel.showModal();
+  refreshAiStatus();
+  if (prefill) elements.input2.value = prefill;
+  elements.input2.focus();
+}
+
+function exportPlan() {
   if (!state.insights || !state.report) return;
   const { answer, recommendations, workflow } = state.insights;
-  const text = [`# Remediation plan: ${state.report.root}`, "", answer, "", "## Recommendations", ...recommendations.map((item) => `- ${item.text}`), "", "## Workflow", ...workflow.map((step) => `- [ ] ${step.title}\n  ${step.detail}${step.verify ? `\n  Verify: ${step.verify}` : ""}`), "", "AI-generated guidance. Review before applying changes."].join("\n");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
-  link.download = "repolens-remediation.md";
-  link.click();
-  URL.revokeObjectURL(link.href);
+  const text = [`# Prescription: ${state.report.root}`, "", answer, "",
+    ...(recommendations.length ? ["## Recommendations", ...recommendations.map((item) => `- ${item.text}`), ""] : []),
+    "## Steps", ...workflow.map((step) => `- [ ] **${step.title}**\n  ${step.detail}${step.verify ? `\n  - Verify: ${step.verify}` : ""}`), "",
+    "_Generated guidance. Review before applying changes._"].join("\n");
+  download("repolens-prescription.md", text);
+  toast("Plan saved as Markdown");
+}
+
+// --- Wiring ---------------------------------------------------------------------
+
+elements.form.addEventListener("submit", analyzeRepository);
+document.querySelectorAll("[data-sample]").forEach((button) => button.addEventListener("click", () => {
+  elements.input.value = button.dataset.sample;
+  elements.form.requestSubmit();
+}));
+
+document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll(".filter").forEach((item) => {
+    item.classList.toggle("is-active", item === button);
+    item.setAttribute("aria-pressed", String(item === button));
+  });
+  state.filter = button.dataset.filter;
+  if (state.report) renderLines();
+}));
+
+elements.grid.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-check-id]");
+  if (button) openDetail(button.dataset.checkId);
 });
-document.addEventListener("keydown", (event) => {
-  const modal = state.assistantOpen ? elements.assistantPanel : !elements.detailOverlay.hidden ? elements.detailOverlay : null;
-  if (!modal) return;
-  if (event.key === "Escape") {
-    if (state.assistantOpen) closeAssistant();
-    else renderDetailWindow(null);
-  }
-  if (event.key === "Tab") {
-    const focusable = [...modal.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]")].filter((item) => item.getClientRects().length);
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+
+elements.historyList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-entry]");
+  const entry = button && state.history.find((item) => item.id === button.dataset.entry);
+  if (!entry) return;
+  selectReport(entry.report, entry.scannedAt);
+  elements.input.value = entry.url;
+  setStatus(`Showing the saved examination of ${repoName(entry.report)}.`);
+  elements.record.scrollIntoView({ block: "start" });
+});
+
+$("#clearHistory").addEventListener("click", () => {
+  storeHistory([]);
+  state.history = [];
+  renderHistory();
+  toast("Case files cleared");
+});
+
+$("#rxMarkdown").addEventListener("click", () => state.report && exportMarkdown(state.report));
+$("#rxPrint").addEventListener("click", () => state.report && exportPdf(state.report, state.scannedAt));
+$("#askPlan").addEventListener("click", () => {
+  state.activeCheckId = null;
+  openExaminer();
+  askExaminer(DEFAULT_QUESTION);
+});
+
+$("#closeCheckDetail").addEventListener("click", () => elements.detail.close());
+elements.detail.addEventListener("click", (event) => { if (event.target === elements.detail) elements.detail.close(); });
+$("#askAboutCheck").addEventListener("click", () => openExaminer(`How do I resolve the ${state.activeCheckId} finding?`));
+
+elements.launcher.addEventListener("click", () => openExaminer());
+$("#assistantToggle").addEventListener("click", () => elements.panel.close());
+elements.panel.addEventListener("click", (event) => { if (event.target === elements.panel) elements.panel.close(); });
+elements.panel.addEventListener("close", () => elements.launcher.focus());
+$("#clearFocus").addEventListener("click", () => { state.activeCheckId = null; renderExaminer(); });
+
+document.querySelectorAll(".examiner .prompts .prompt").forEach((button) => button.addEventListener("click", () => askExaminer(button.dataset.question)));
+elements.chat.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-question]");
+  if (button) askExaminer(button.dataset.question);
+});
+
+$("#assistantForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const question = elements.input2.value;
+  elements.input2.value = "";
+  askExaminer(question);
+});
+elements.input2.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    $("#assistantForm").requestSubmit();
   }
 });
 
-elements.detailOverlay.addEventListener("click", (event) => {
-  if (event.target === elements.detailOverlay) {
-    renderDetailWindow(null);
-  }
+elements.cancel.addEventListener("click", () => state.controller?.abort());
+elements.retry.addEventListener("click", () => {
+  // Drop the failed exchange so the retried question is the only copy sent.
+  const failed = state.conversation.findLastIndex((message) => message.error);
+  if (failed > 0) state.conversation.splice(failed - 1, 2);
+  askExaminer(state.lastQuestion);
 });
-elements.closeDetail.addEventListener("click", () => renderDetailWindow(null));
-if (elements.clearHistory) {
-  elements.clearHistory.addEventListener("click", () => {
-    state.history = [];
-    sessionStorage.removeItem(HISTORY_KEY);
-    renderHistory();
-  });
-}
-document.querySelector("#refreshButton").addEventListener("click", loadReport);
-elements.form.addEventListener("submit", analyzeRepository);
+elements.exportPlan.addEventListener("click", exportPlan);
+document.querySelectorAll("input[name=advisorMode]").forEach((radio) => radio.addEventListener("change", () => {
+  if (radio.value === "gemini" && !state.aiReady) toast("The server has no Gemini key; offline answers only", "error");
+}));
+
+renderMethod();
 renderHistory();
-loadReport();
+render();
+refreshAiStatus();

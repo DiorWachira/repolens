@@ -78,7 +78,17 @@ The project includes a browser dashboard served by the standard-library web serv
 python -m repolens.web --port 8000
 ```
 
-Open `http://127.0.0.1:8000` and enter a public GitHub repository URL. The server downloads and analyzes its archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Local folders are audited through the CLI; the dashboard does not automatically load CLI output. Scan history stays in browser session storage. Fonts and icons load from external CDNs.
+Open `http://127.0.0.1:8000` and enter a public GitHub repository URL. The server downloads and analyzes its archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Local folders are audited through the CLI; the dashboard does not automatically load CLI output. Case files (scan history) stay in browser session storage.
+
+The interface is designed around one idea, **a repository examined like an eye**:
+
+- **Acuity chart.** The hero is a Bailey–Lovie logMAR chart. The health score maps onto it (100 reads 20/20, 0 reads 20/200), and lines finer than the repository's acuity blur out.
+- **Control strip.** One numbered patch per check, after the Kodak Q-13 colour control patches.
+- **Resolution-target progress.** Progress is shown with USAF-1951 bar triplets.
+- **Prescription (℞).** The remediation plan, with a verify command per line.
+- **The Examiner.** The advisor, presented as a consultation transcript.
+
+The palette is paper and ink plus one signal colour: cobalt, after the slit lamp's cobalt-blue filter, reserved for the primary action and current focus. Status colours were checked with a colour-vision-deficiency validator in both themes and always pair a glyph with a label. Type is Optician Sans (built from Louise Sloan's optotypes, SIL OFL, self-hosted in `frontend/fonts`), Newsreader and IBM Plex Sans/Mono from Google Fonts. Light, dark and system themes are available.
 
 ### AI-guided analysis (optional)
 
@@ -126,7 +136,7 @@ repolens/
 │   ├── cli.py             # argument parsing and exit codes
 │   ├── web.py             # browser dashboard server and job APIs
 │   └── ai.py              # optional Gemini-powered analysis and recommendations
-├── frontend/               # dependency-free dashboard, history page, exports
+├── frontend/              # dependency-free dashboard, case files, 404, exports, self-hosted font
 ├── tests/
 └── .github/
     ├── skills/add-check/  # agent skill for extending the tool

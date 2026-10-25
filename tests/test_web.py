@@ -117,6 +117,13 @@ class TestAdvisorHttp(unittest.TestCase):
             self.assertEqual(caught.exception.code, 400)
             caught.exception.close()
 
+    def test_missing_page_serves_designed_404(self):
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(self.url + "/no-such-page", timeout=5)
+        self.assertEqual(caught.exception.code, 404)
+        self.assertIn("out of focus", caught.exception.read().decode())
+        caught.exception.close()
+
     def test_large_bodies_are_rejected(self):
         with self.assertRaises(HTTPError) as caught:
             urlopen(Request(self.url + "/api/insights", data=b"x" * (web.MAX_REQUEST_BYTES + 1)), timeout=5)
