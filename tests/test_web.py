@@ -5,7 +5,6 @@ import json
 import tempfile
 import threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest import mock
@@ -83,7 +82,7 @@ class TestAdvisorJobs(unittest.TestCase):
 class TestAdvisorHttp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), web.ReportHandler)
+        cls.server = web.DashboardServer(("127.0.0.1", 0), web.ReportHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.url = f"http://127.0.0.1:{cls.server.server_port}"
@@ -129,6 +128,13 @@ class TestAdvisorHttp(unittest.TestCase):
             urlopen(Request(self.url + "/api/insights", data=b"x" * (web.MAX_REQUEST_BYTES + 1)), timeout=5)
         self.assertEqual(caught.exception.code, 413)
         caught.exception.close()
+
+    def test_server_accepts_a_burst_of_connections(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.assertGreaterEqual(web.DashboardServer.request_queue_size, 64)
+        with ThreadPoolExecutor(max_workers=40) as pool:
+            statuses = list(pool.map(lambda _: urlopen(self.url + "/healthz", timeout=10).status, range(120)))
+        self.assertEqual(set(statuses), {200})
 
     def test_health_check_and_security_headers(self):
         with urlopen(self.url + "/healthz", timeout=5) as response:
