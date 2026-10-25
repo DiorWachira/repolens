@@ -17,6 +17,7 @@ def render_text(results: list[CheckResult], root: str) -> str:
     lines = [f"repolens report for {root}", ""]
     for r in results:
         lines.append(f"  {SYMBOLS[r.status]}  {r.id.ljust(id_width)}  {r.title} - {r.detail}")
+        lines.extend(f"  {' ' * (6 + id_width)}  - {item}" for item in r.evidence)
 
     counts = {s: sum(1 for r in results if r.status is s) for s in Status}
     lines.append("")
@@ -32,7 +33,8 @@ def render_json(results: list[CheckResult], root: str) -> str:
         "root": root,
         "score": score(results),
         "checks": [
-            {"id": r.id, "title": r.title, "status": r.status.value, "detail": r.detail} for r in results
+            {"id": r.id, "title": r.title, "status": r.status.value, "detail": r.detail, "evidence": list(r.evidence)}
+            for r in results
         ],
     }
     return json.dumps(payload, indent=2)

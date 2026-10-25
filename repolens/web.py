@@ -162,10 +162,8 @@ def report_for_github_url(url: str, update=None) -> dict[str, object]:
         checks = []
         for result in results:
             check = {"id": result.id, "title": result.title, "status": result.status.value, "detail": result.detail}
-            if result.id == "secrets" and result.status.value == "fail":
-                check["locations"] = result.detail.split("locations: ", 1)[-1].split("; ")
-            elif result.id == "large-files" and result.status.value == "warn":
-                check["locations"] = result.detail.split("affected: ", 1)[-1].split("; ")
+            if result.evidence:
+                check["locations"] = list(result.evidence)
             checks.append(check)
         return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": checks, "profile": repository_profile(repo)}
 

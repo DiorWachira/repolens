@@ -25,10 +25,18 @@ class Status(Enum):
 
 @dataclass(frozen=True)
 class CheckResult:
+    """One check's outcome.
+
+    `detail` is a short human summary; `evidence` holds the specific
+    locations behind it (file paths, `path:line` references) so renderers
+    never have to parse them back out of prose.
+    """
+
     id: str
     title: str
     status: Status
     detail: str
+    evidence: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
