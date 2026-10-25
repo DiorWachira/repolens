@@ -80,6 +80,27 @@ python -m repolens.web --port 8000
 
 Open `http://127.0.0.1:8000` and enter a public GitHub repository URL. The server downloads and analyzes its archive locally, showing download, extraction and per-check progress. Downloads allow up to 60 seconds, and each analysis can run for up to 180 seconds. Local folders are audited through the CLI; the dashboard does not automatically load CLI output. Scan history stays in browser session storage. Fonts and icons load from external CDNs.
 
+Archives come from `codeload.github.com`, which is not subject to the REST API's 60-requests-per-hour limit. An archive must be at most 50 MB compressed, expand to at most 300 MB, and contain at most 20,000 entries.
+
+### Deploying (Render)
+
+The repository ships a [Render Blueprint](render.yaml) for a free Python web service. Nothing needs to be installed.
+
+1. In Render, choose **New → Blueprint** and select this repository.
+2. When prompted, paste your `GEMINI_API_KEY`. It is stored as a Render secret. Leave it blank to deploy with the offline examiner only.
+3. Deploy. Every push to `main` redeploys automatically, and `/healthz` is the health check.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` / `HOST` | `8000` / `127.0.0.1` | Listening address. Render sets `PORT`; the blueprint binds `0.0.0.0`. Also available as `--port` / `--host`. |
+| `GEMINI_API_KEY` | unset | Enables the Gemini examiner. |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Preferred model; the fallback chain still applies. |
+| `REPOLENS_REPORTS_PER_WINDOW` | `12` | Examinations per client per 10 minutes (`0` disables). |
+| `REPOLENS_QUESTIONS_PER_WINDOW` | `40` | Examiner questions per client per 10 minutes (`0` disables). Protects your Gemini quota. |
+| `REPOLENS_TRUST_PROXY` | off | Use the first `X-Forwarded-For` hop as the client address. Enable only behind a trusted proxy (the blueprint does). |
+
+Free Render instances sleep after inactivity, so the first request can take up to a minute. Jobs and rate limits are held in memory, so they reset on restart, and the service is meant to run as a single instance.
+
 ### AI-guided analysis (optional)
 
 The repository advisor sends questions, selected-check context, and recent conversation to the [Google Gemini API](https://aistudio.google.com/apikey). It returns a direct answer, recommendations, and a remediation workflow. API access, quotas, and pricing depend on your Google project and model:
