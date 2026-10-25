@@ -247,6 +247,8 @@ async function analyzeRepository(event) {
     selectReport(report);
     renderHistory();
     setStatus(`Examined ${repoName(report)}. The record is below.`);
+    // A shareable address: opening it runs the same examination.
+    history.replaceState(null, "", `${location.pathname}?url=${encodeURIComponent(url)}`);
     elements.record.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     elements.launcher.classList.add("is-inviting");
   } catch (error) {
@@ -568,3 +570,11 @@ renderMethod();
 renderHistory();
 render();
 refreshAiStatus();
+
+// `/?url=…` examines that repository on arrival. This also rescues a submit that
+// beat this script: without JavaScript the form falls back to a GET to the same page.
+const requestedUrl = new URLSearchParams(location.search).get("url");
+if (requestedUrl) {
+  elements.input.value = requestedUrl;
+  elements.form.requestSubmit();
+}

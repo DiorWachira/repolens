@@ -261,6 +261,17 @@ def create_ai_job(report: dict, question: str = "", history: list | None = None,
     return job_id
 
 
+class DashboardServer(ThreadingHTTPServer):
+    """Threaded server with a listen backlog sized for a browser's burst of requests.
+
+    The standard library default of 5 refuses connections when a page load,
+    job polling and a few visitors overlap, which surfaces as half-loaded pages.
+    """
+
+    daemon_threads = True
+    request_queue_size = 128
+
+
 class ReportHandler(SimpleHTTPRequestHandler):
     """Serve the dashboard and one URL-driven report endpoint."""
 
@@ -386,7 +397,7 @@ def main() -> None:
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"), help="interface to bind (use 0.0.0.0 in a container or PaaS)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")), help="port to listen on (defaults to $PORT, then 8000)")
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), ReportHandler)
+    server = DashboardServer((args.host, args.port), ReportHandler)
     shown = "localhost" if args.host in {"127.0.0.1", "0.0.0.0"} else args.host
     print(f"repolens dashboard: http://{shown}:{args.port}", flush=True)
     try:

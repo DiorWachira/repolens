@@ -70,6 +70,17 @@ python -m unittest discover -s tests -v
 python -m repolens .
 ```
 
+### Browser tests
+
+`e2e/` holds Playwright smoke tests for the dashboard. They are dev and CI only; the app itself still has no JavaScript dependencies. The real Python server serves the pages, while GitHub and Gemini responses are mocked, so the suite runs offline at desktop and phone widths:
+
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+npx playwright test
+```
+
 ### Frontend dashboard
 
 The project includes a browser dashboard served by the standard-library web server:

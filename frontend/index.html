@@ -61,7 +61,7 @@
           <h1 id="heroTitle">Read your repository <em>line by line.</em></h1>
           <p class="lede">RepoLens downloads a public GitHub repository and puts it through eight lines of the chart: README, license, ignore rules, tests, CI, TODO debt, oversized files and hardcoded secrets. Then the examiner writes the prescription.</p>
 
-          <form class="exam-form" id="repoForm" novalidate>
+          <form class="exam-form" id="repoForm" action="./" method="get" novalidate>
             <label class="label" for="repoUrl">Repository to examine</label>
             <div class="exam-input">
               <input id="repoUrl" name="url" type="url" inputmode="url" placeholder="https://github.com/owner/repository" autocomplete="url" spellcheck="false" required aria-describedby="formStatus">
