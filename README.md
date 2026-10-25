@@ -109,7 +109,7 @@ The repository ships a [Render Blueprint](render.yaml) for a free Python web ser
 | `REPOLENS_QUESTIONS_PER_WINDOW` | `40` | Examiner questions per client per 10 minutes (`0` disables). Protects your Gemini quota. |
 | `REPOLENS_TRUST_PROXY` | off | Use the first `X-Forwarded-For` hop as the client address. Enable only behind a trusted proxy (the blueprint does). |
 
-Free Render instances sleep after inactivity, so the first request can take up to a minute. Jobs and rate limits are held in memory, so they reset on restart, and the service is meant to run as a single instance.
+Free Render instances sleep after inactivity, so the first request can take up to a minute. Jobs and rate limits are held in memory, so they reset on restart, and the blueprint pins the service to a single instance. If the server restarts mid-examination, the dashboard notices the lost job and re-runs the examination once. A lost examiner answer shows a Retry button.
 
 ### AI-guided analysis (optional)
 

@@ -206,11 +206,15 @@ function setStatus(message, tone = "") {
   elements.formStatus.textContent = message;
 }
 
+// Jobs live in server memory, so a restart (deploy, idle spin-down) forgets them.
+class JobLostError extends Error {}
+
 async function pollJob(jobId) {
   const deadline = Date.now() + 190000;
   while (Date.now() < deadline) {
     const response = await fetch(`/api/report/${jobId}?ts=${Date.now()}`);
     const job = await response.json();
+    if (response.status === 404) throw new JobLostError("The server restarted during the examination");
     if (!response.ok) throw new Error(job.error || "Examination job unavailable");
     renderTarget(job.progress);
     elements.progressMessage.textContent = job.message;
@@ -237,10 +241,21 @@ async function analyzeRepository(event) {
   elements.progressMessage.textContent = "Starting examination";
   renderTarget(2);
   try {
-    const response = await fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
-    const start = await response.json();
-    if (!response.ok) throw new Error(start.error || "Could not start the examination");
-    const report = await pollJob(start.job_id);
+    const startExamination = async () => {
+      const response = await fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const start = await response.json();
+      if (!response.ok) throw new Error(start.error || "Could not start the examination");
+      return pollJob(start.job_id);
+    };
+    let report;
+    try {
+      report = await startExamination();
+    } catch (error) {
+      if (!(error instanceof JobLostError)) throw error;
+      setStatus("The server restarted mid-examination. Running it again.", "loading");
+      renderTarget(2);
+      report = await startExamination();
+    }
     renderTarget(100);
     elements.progressMessage.textContent = "Examination complete";
     state.history = saveToHistory(report, url);
@@ -409,6 +424,7 @@ async function askGemini(question) {
     while (Date.now() < deadline) {
       const statusResponse = await fetch(`/api/insights/${start.job_id}?ts=${Date.now()}`, { signal: controller.signal });
       const job = await statusResponse.json();
+      if (statusResponse.status === 404) throw new Error("The server restarted before answering. Press Retry to ask again.");
       if (!statusResponse.ok) throw new Error(job.error || "The examiner's job is unavailable");
       if (job.state === "complete") { insights = job.insights; break; }
       if (job.state === "error") throw new Error(job.error || job.message || "The examiner could not answer");
