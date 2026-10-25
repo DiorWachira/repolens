@@ -88,8 +88,9 @@ class TestTodosAndLargeFiles(RepoFixture):
         self.write("first.bin", "x" * 5_000_001)
         self.write("second.bin", "x" * 5_000_002)
         result = self.result("large-files")
-        self.assertIn("first.bin", result.detail)
-        self.assertIn("second.bin", result.detail)
+        self.assertEqual(result.evidence, ("first.bin (5 MB)", "second.bin (5 MB)"))
+        self.assertIn("2 files > 5 MB", result.detail)
+        self.assertNotIn("affected", result.detail)
 
 
 class TestSecrets(RepoFixture):
@@ -107,7 +108,8 @@ class TestSecrets(RepoFixture):
         self.write("config.py", self.assignment("DB_PASSWORD", "hunter2hunter2"))
         result = self.result("secrets")
         self.assertIs(result.status, Status.FAIL)
-        self.assertIn("config.py:1", result.detail)
+        self.assertEqual(result.detail, "1 suspected secret")
+        self.assertEqual(result.evidence, ("config.py:1 (hardcoded credential)",))
 
     def test_placeholder_value_is_ignored(self) -> None:
         self.write("config.py", self.assignment("API_KEY", "your-key-here"))
@@ -125,8 +127,12 @@ class TestSecrets(RepoFixture):
         self.write("first.py", self.assignment("TOKEN", "abcdefgh12345678"))
         self.write("second.py", self.assignment("PASSWORD", "abcdefgh87654321"))
         result = self.result("secrets")
-        self.assertIn("first.py:1", result.detail)
-        self.assertIn("second.py:1", result.detail)
+        self.assertEqual(result.evidence, ("first.py:1 (hardcoded credential)", "second.py:1 (hardcoded credential)"))
+        self.assertEqual(result.detail, "2 suspected secrets")
+
+    def test_passing_checks_carry_no_evidence(self) -> None:
+        self.write("app.py", "x")
+        self.assertEqual(self.result("secrets").evidence, ())
 
     def test_ignored_directories_are_not_scanned(self) -> None:
         self.write("node_modules/pkg/config.js", self.assignment("token", "abcdef1234567890"))

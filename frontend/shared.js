@@ -148,7 +148,7 @@ function prescription(report, scannedAt = new Date().toISOString()) {
       <span class="rx-no">${String(index + 1).padStart(2, "0")}</span>
       <div class="rx-body">
         <div class="rx-head"><strong>${escapeHtml(check.title)}</strong>${statusMark(check.status)}</div>
-        <p class="rx-detail">${escapeHtml(check.detail.split("; locations:")[0].split("; affected:")[0])}</p>
+        <p class="rx-detail">${escapeHtml(check.detail)}</p>
         <p class="rx-fix">${escapeHtml(guidanceFor(check))}</p>
         ${evidenceList(check)}
         <p class="rx-verify"><span>Verify</span><code>${escapeHtml(CATALOGUE[check.id]?.verify || "")}</code></p>

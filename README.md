@@ -61,6 +61,8 @@ repolens --list                 # show available checks
 
 Scoring is `pass = 1`, `warn = 0.5`, `fail = 0`, averaged and reported out of 100.
 
+Each result has a short `detail` summary and an `evidence` list with the specific locations behind it: `path:line (kind)` for `secrets` and `path (size)` for `large-files`. The text report prints evidence indented under its check, and `--json` emits it as an `evidence` array on every check (empty when there is nothing to point at).
+
 Vendor and build directories (`.git`, `node_modules`, `.venv`, `dist`, `build`, `__pycache__`, …) are skipped everywhere.
 
 ## Development

@@ -36,6 +36,16 @@ class TestCli(unittest.TestCase):
         self.assertIn("score", payload)
         self.assertTrue(payload["checks"])
 
+    def test_json_and_text_include_evidence(self) -> None:
+        quote = chr(34)
+        (self.root / "settings.py").write_text(f"password = {quote}hunter2hunter2{quote}\n", encoding="utf-8")
+        _, out = self.run_cli(str(self.root), "--only", "secrets", "--json")
+        check = json.loads(out)["checks"][0]
+        self.assertEqual(check["detail"], "1 suspected secret")
+        self.assertEqual(check["evidence"], ["settings.py:1 (hardcoded credential)"])
+        _, text = self.run_cli(str(self.root), "--only", "secrets")
+        self.assertIn("- settings.py:1 (hardcoded credential)", text)
+
     def test_missing_path_reports_error(self) -> None:
         code, out = self.run_cli(str(self.root / "nope"))
         self.assertEqual(code, 2)

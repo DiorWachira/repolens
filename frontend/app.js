@@ -130,7 +130,7 @@ function renderLines() {
       <button type="button" class="line-button" data-check-id="${escapeHtml(check.id)}" aria-haspopup="dialog">
         <span class="line-no">${String(index + 1).padStart(2, "0")}</span>
         <span class="line-optotype" aria-hidden="true">${escapeHtml(check.id[0].toUpperCase())}</span>
-        <span class="line-text"><strong>${escapeHtml(check.title)}</strong><span>${escapeHtml(check.detail.split("; locations:")[0].split("; affected:")[0])}</span></span>
+        <span class="line-text"><strong>${escapeHtml(check.title)}</strong><span>${escapeHtml(check.detail)}</span></span>
         <span class="line-id">${escapeHtml(check.id)}</span>
         ${statusMark(check.status)}
         <span class="line-open" aria-hidden="true"><svg><use href="#i-arrow"/></svg></span>
@@ -270,7 +270,7 @@ function openDetail(checkId) {
   $("#checkDetailOptotype").className = `slip-optotype optotype-${check.status}`;
   $("#checkDetailTitle").textContent = check.title;
   $("#checkDetailStatus").innerHTML = statusMark(check.status);
-  $("#checkDetailSummary").textContent = check.detail.split("; locations:")[0].split("; affected:")[0];
+  $("#checkDetailSummary").textContent = check.detail;
   $("#checkDetailEvidenceRow").hidden = !check.locations?.length;
   $("#checkDetailEvidence").innerHTML = evidenceList(check);
   $("#checkDetailMeasures").textContent = CATALOGUE[check.id]?.measures || "";
@@ -297,14 +297,14 @@ function offlineAnswer(question) {
   }
   if (focus && /(this|check|line|explain|resolve|fix)/.test(text)) {
     return {
-      answer: `\`${focus.id}\` is **${STATUS[focus.status].label.toLowerCase()}**: ${focus.detail.split("; locations:")[0]}.\n\n${CATALOGUE[focus.id].measures}\n\n${guidanceFor(focus)}\n\nVerify with:\n\n\`\`\`\n${CATALOGUE[focus.id].verify}\n\`\`\``,
+      answer: `\`${focus.id}\` is **${STATUS[focus.status].label.toLowerCase()}**: ${focus.detail}.\n\n${CATALOGUE[focus.id].measures}\n\n${guidanceFor(focus)}\n\nVerify with:\n\n\`\`\`\n${CATALOGUE[focus.id].verify}\n\`\`\``,
       recommendations: [], workflow: [], follow_ups: ["Build a fix plan for the whole report"],
     };
   }
   if (/(first|priority|urgent|next|most important)/.test(text)) {
     const first = actionable[0];
     return {
-      answer: first ? `Start with \`${first.id}\`, **${first.title.toLowerCase()}**: ${first.detail.split("; locations:")[0]}. ${guidanceFor(first)}` : "Nothing is urgent. Every line reads clearly.",
+      answer: first ? `Start with \`${first.id}\`, **${first.title.toLowerCase()}**: ${first.detail}. ${guidanceFor(first)}` : "Nothing is urgent. Every line reads clearly.",
       recommendations: [], workflow: [], follow_ups: first ? [`How do I verify the ${first.id} fix?`, "Build a fix plan for the whole report"] : [],
     };
   }
