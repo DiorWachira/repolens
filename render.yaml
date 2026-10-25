@@ -1,0 +1,26 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# New > Blueprint > pick this repository. Render will ask for GEMINI_API_KEY.
+services:
+  - type: web
+    name: repolens
+    runtime: python
+    plan: free
+    branch: main
+    autoDeploy: true
+    # The server is standard-library Python: nothing to install.
+    buildCommand: python --version
+    startCommand: python -m repolens.web --host 0.0.0.0
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      # Rate limits use the client address from Render's proxy.
+      - key: REPOLENS_TRUST_PROXY
+        value: "true"
+      - key: REPOLENS_REPORTS_PER_WINDOW
+        value: "12"
+      - key: REPOLENS_QUESTIONS_PER_WINDOW
+        value: "40"
+      # Entered in the Render dashboard; never committed.
+      - key: GEMINI_API_KEY
+        sync: false
