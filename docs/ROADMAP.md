@@ -199,4 +199,4 @@ Each check returns `pass`, `warn`, or `fail`. The score averages those statuses 
 
 ## Roadmap File Location
 
-This file is stored in `repolens.egg-info/` at the requested location and explicitly included in version control. The rest of that directory remains ignored by `.gitignore`. Packaging tools may remove or replace files in this generated directory; a future cleanup should move this tracked roadmap to the repository root while preserving its history.
+This roadmap lives at `docs/ROADMAP.md`. It previously sat in the generated `repolens.egg-info/` directory and was moved with its history preserved (#9).
