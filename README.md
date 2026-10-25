@@ -4,6 +4,16 @@ Audit any repository from the command line and get a health report — README qu
 
 Pure Python standard library: no dependencies, nothing to install in CI beyond Python itself.
 
+## Try it online
+
+**Live site: <https://repolens-klm1.onrender.com>.** Paste any public GitHub repository URL and get its examination record, the lines of the chart, a prescription, and an optional AI Examiner to ask about the result.
+
+New to the site? Read the **[guide to using RepoLens](docs/USING.md)**. It walks through every screen, explains how to read the score, covers the Examiner's modes, and lists limits, privacy and troubleshooting.
+
+![The RepoLens dashboard](docs/images/01-start.jpg)
+
+The hosted site runs on a free instance that sleeps when idle, so the first visit can take up to a minute.
+
 ## Quick start
 
 ```bash
