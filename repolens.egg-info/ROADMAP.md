@@ -170,12 +170,12 @@ Each check returns `pass`, `warn`, or `fail`. The score averages those statuses 
 
 ### Deferred Advisor Fixes (2026-10-05)
 
-User-reported issue: the advisor responds to the initial request, but subsequent follow-up questions repeat the same answer instead of addressing the new question. Deferred at the user's request; the cause is not yet confirmed.
+**Resolved in #2 (2026-10-25).** User-reported issue: the advisor responds to the initial request, but subsequent follow-up questions repeat the same answer instead of addressing the new question. Deferred at the user's request; the cause is not yet confirmed.
 
-- [ ] Reproduce repeated answers with a multi-turn conversation and capture the outgoing question, selected check, and conversation context without credentials.
-- [ ] Check whether whole-report summary instructions override the latest question; make follow-ups answer that question without unnecessarily regenerating the original analysis and workflow.
-- [ ] Verify that earlier answers and workflow steps retain their meaning in conversation history, including follow-ups such as "explain step two" and requests for more specific verification commands.
-- [ ] Add regression coverage for initial analysis followed by distinct questions, including references to earlier steps and switching between repositories.
+- [x] Reproduce repeated answers with a multi-turn conversation and capture the outgoing question, selected check, and conversation context without credentials.
+- [x] Check whether whole-report summary instructions override the latest question; make follow-ups answer that question without unnecessarily regenerating the original analysis and workflow.
+- [x] Verify that earlier answers and workflow steps retain their meaning in conversation history, including follow-ups such as "explain step two" and requests for more specific verification commands.
+- [x] Add regression coverage for initial analysis followed by distinct questions, including references to earlier steps and switching between repositories.
 - [ ] Verify in the browser with live Gemini responses that distinct follow-ups receive relevant answers, while retries resend only the intended question.
 
 **Acceptance criteria:** after an initial analysis, at least two distinct follow-ups produce relevant, context-aware answers rather than repeating the original response. Tests must check question and context handling, not merely that an API response is returned.

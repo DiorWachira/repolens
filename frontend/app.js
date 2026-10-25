@@ -298,10 +298,21 @@ function renderAssistantChat() {
     <div class="assistant-message assistant-message-${message.role}">
       <p class="assistant-message-label">${message.role === "bot" ? (message.source || "Local guide") : "You"}</p>
       <p>${escapeHtml(message.text)}</p>
-      ${message.insights ? `<h4>Recommendations</h4><ul>${message.insights.recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><h4>Remediation workflow</h4><ol class="workflow-list">${message.insights.workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong><p>${escapeHtml(step.detail)}</p></li>`).join("")}</ol>` : ""}
+      ${message.insights?.recommendations.length ? `<h4>Recommendations</h4><ul>${message.insights.recommendations.map((item) => `<li>${escapeHtml(item.text)}${item.checks.length ? ` <code>${item.checks.map(escapeHtml).join(", ")}</code>` : ""}</li>`).join("")}</ul>` : ""}
+      ${message.insights?.workflow.length ? `<h4>Remediation workflow</h4><ol class="workflow-list">${message.insights.workflow.map((step) => `<li><strong>${escapeHtml(step.title)}</strong><p>${escapeHtml(step.detail)}</p>${step.verify ? `<p><em>Verify:</em> ${escapeHtml(step.verify)}</p>` : ""}</li>`).join("")}</ol>` : ""}
+      ${message.insights?.follow_ups.length ? `<div class="assistant-suggestions">${message.insights.follow_ups.map((question) => `<button type="button" class="assistant-suggestion" data-follow-up="${escapeHtml(question)}">${escapeHtml(question)}</button>`).join("")}</div>` : ""}
     </div>
   `).join("");
+  elements.assistantChat.querySelectorAll("[data-follow-up]").forEach((button) => button.addEventListener("click", () => askAdvisor(button.dataset.followUp)));
   elements.assistantChat.scrollTop = elements.assistantChat.scrollHeight;
+}
+
+// Earlier answers are replayed as plain text with numbered steps, so follow-ups like "explain step two" resolve.
+function messageAsText({ text, insights }) {
+  if (!insights) return text;
+  const steps = insights.workflow.map((step, index) => `Step ${index + 1}: ${step.title} - ${step.detail}`);
+  const recommendations = insights.recommendations.map((item) => `- ${item.text}`);
+  return [insights.answer, recommendations.length ? `Recommendations:\n${recommendations.join("\n")}` : "", steps.join("\n")].filter(Boolean).join("\n\n");
 }
 
 function renderAssistantInsight(report) {
@@ -394,7 +405,7 @@ async function requestAiGuidance(question = state.lastQuestion) {
     return;
   }
   const report = state.report;
-  const history = state.assistantConversation.filter((message) => !message.error).slice(-6).map(({ role, text, insights }) => ({ role, text: (insights ? JSON.stringify(insights) : text).slice(0, 8000) }));
+  const history = state.assistantConversation.filter((message) => !message.error).slice(-8).map((message) => ({ role: message.role, text: messageAsText(message).slice(0, 8000) }));
   state.lastQuestion = question;
   addAssistantMessage("user", question);
   const pending = { role: "bot", source: "Gemini", text: "Preparing repository context..." };
@@ -408,7 +419,7 @@ async function requestAiGuidance(question = state.lastQuestion) {
     const startResponse = await fetch("/api/insights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ report, question: state.activeCheckId ? `${question}\nSelected check: ${state.activeCheckId}` : question, history }),
+      body: JSON.stringify({ report, question, history, focus: state.activeCheckId }),
       signal: controller.signal,
     });
     const start = await startResponse.json();
@@ -429,7 +440,8 @@ async function requestAiGuidance(question = state.lastQuestion) {
     if (!insights) throw new Error("AI analysis timed out");
 
     if (state.report !== report || controller.signal.aborted) return;
-    pending.text = insights.summary;
+    pending.text = insights.answer;
+    pending.source = `Gemini · ${insights.model}`;
     pending.insights = insights;
     state.insights = insights;
     document.querySelector("#exportWorkflow").disabled = false;
@@ -721,8 +733,8 @@ document.querySelector("#askAboutCheck").addEventListener("click", () => {
 document.querySelector("#retryAi").addEventListener("click", () => requestAiGuidance());
 document.querySelector("#exportWorkflow").addEventListener("click", () => {
   if (!state.insights || !state.report) return;
-  const { summary, recommendations, workflow } = state.insights;
-  const text = [`# Remediation plan: ${state.report.root}`, "", summary, "", "## Recommendations", ...recommendations.map((item) => `- ${item}`), "", "## Workflow", ...workflow.map((step) => `- [ ] ${step.title}\n  ${step.detail}`), "", "AI-generated guidance. Review before applying changes."].join("\n");
+  const { answer, recommendations, workflow } = state.insights;
+  const text = [`# Remediation plan: ${state.report.root}`, "", answer, "", "## Recommendations", ...recommendations.map((item) => `- ${item.text}`), "", "## Workflow", ...workflow.map((step) => `- [ ] ${step.title}\n  ${step.detail}${step.verify ? `\n  Verify: ${step.verify}` : ""}`), "", "AI-generated guidance. Review before applying changes."].join("\n");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
   link.download = "repolens-remediation.md";

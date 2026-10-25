@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import Counter
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -103,7 +104,18 @@ def report_for_github_url(url: str, update=None) -> dict[str, object]:
             elif result.id == "large-files" and result.status.value == "warn":
                 check["locations"] = result.detail.split("affected: ", 1)[-1].split("; ")
             checks.append(check)
-        return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": checks}
+        return {"root": f"github.com/{owner}/{repository}", "score": score(results), "checks": checks, "profile": repository_profile(repo)}
+
+
+def repository_profile(repo: Repo) -> dict[str, object]:
+    """Small, non-sensitive shape of the repository: size, file types, layout."""
+    extensions = Counter(path.suffix.lower() or path.name for path in repo.files)
+    top_level = sorted({path.parts[0] + ("/" if len(path.parts) > 1 else "") for path in repo.files})
+    return {
+        "files": len(repo.files),
+        "languages": [{"ext": ext, "count": count} for ext, count in extensions.most_common(8)],
+        "top_level": top_level[:30],
+    }
 
 
 def update_job(job_id: str, progress: int, message: str) -> None:
@@ -139,7 +151,7 @@ def create_job(url: str) -> str:
     return job_id
 
 
-def run_ai_job(job_id: str, report: dict, question: str = "", history: list | None = None) -> None:
+def run_ai_job(job_id: str, report: dict, question: str = "", history: list | None = None, focus: str | None = None) -> None:
     started = time.monotonic()
 
     def expire() -> None:
@@ -161,7 +173,7 @@ def run_ai_job(job_id: str, report: dict, question: str = "", history: list | No
                 job.update({"progress": progress, "message": message})
 
     try:
-        insights = ai.generate_insights(report, update, question=question, history=history)
+        insights = ai.generate_insights(report, update, question=question, history=history, focus=focus)
         with AI_JOBS_LOCK:
             if AI_JOBS[job_id]["state"] == "running":
                 AI_JOBS[job_id].update({"state": "complete", "progress": 100, "message": "AI analysis complete", "insights": insights})
@@ -174,13 +186,13 @@ def run_ai_job(job_id: str, report: dict, question: str = "", history: list | No
         timer.cancel()
 
 
-def create_ai_job(report: dict, question: str = "", history: list | None = None) -> str:
-    ai.validate_request(report, question, history)
+def create_ai_job(report: dict, question: str = "", history: list | None = None, focus: str | None = None) -> str:
+    ai.validate_request(report, question, history, focus)
     ai.api_key()
     job_id = uuid.uuid4().hex
     with AI_JOBS_LOCK:
         AI_JOBS[job_id] = {"state": "running", "progress": 5, "message": "Starting AI analysis"}
-    threading.Thread(target=run_ai_job, args=(job_id, report, question, history), daemon=True).start()
+    threading.Thread(target=run_ai_job, args=(job_id, report, question, history, focus), daemon=True).start()
     return job_id
 
 
@@ -231,6 +243,9 @@ class ReportHandler(SimpleHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length < 0 or length > MAX_REQUEST_BYTES:
+                # Drain a bounded amount so the client sees the 413 instead of a reset.
+                self.rfile.read(min(max(length, 0), 4 * MAX_REQUEST_BYTES))
+                self.close_connection = True
                 return self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "Request body is too large."})
             body = json.loads(self.rfile.read(length)) if length else {}
             if not isinstance(body, dict):
@@ -240,7 +255,7 @@ class ReportHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/insights":
             try:
-                job_id = create_ai_job(body.get("report"), body.get("question", ""), body.get("history"))
+                job_id = create_ai_job(body.get("report"), body.get("question", ""), body.get("history"), body.get("focus"))
                 return self._send_json(HTTPStatus.ACCEPTED, {"job_id": job_id})
             except ValueError as error:
                 return self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
