@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import unittest
 import json
+import tempfile
 import threading
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest import mock
 
 from repolens import web
+from repolens.repo import Repo
 from repolens.web import github_repo_url
 
 
@@ -25,6 +28,19 @@ class TestGithubUrls(unittest.TestCase):
             github_repo_url("https://github.com/example/project/issues")
 
 
+class TestRepositoryProfile(unittest.TestCase):
+    def test_profile_counts_types_and_lists_top_level(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "src").mkdir()
+            (Path(root) / "src" / "a.py").write_text("x")
+            (Path(root) / "src" / "b.py").write_text("x")
+            (Path(root) / "README.md").write_text("x")
+            profile = web.repository_profile(Repo(Path(root)))
+        self.assertEqual(profile["files"], 3)
+        self.assertEqual(profile["languages"][0], {"ext": ".py", "count": 2})
+        self.assertEqual(profile["top_level"], ["README.md", "src/"])
+
+
 class TestAdvisorJobs(unittest.TestCase):
     def setUp(self):
         self.report = {"root": "demo", "score": 100, "checks": []}
@@ -35,7 +51,7 @@ class TestAdvisorJobs(unittest.TestCase):
     def test_question_reaches_model(self):
         with mock.patch("repolens.web.ai.generate_insights", return_value={"summary": "ok"}) as generate:
             web.run_ai_job(self.job_id, self.report, "What next?", [])
-        self.assertEqual(generate.call_args.kwargs, {"question": "What next?", "history": []})
+        self.assertEqual(generate.call_args.kwargs, {"question": "What next?", "history": [], "focus": None})
         self.assertEqual(web.AI_JOBS[self.job_id]["state"], "complete")
 
     def test_provider_failure_is_reported(self):
@@ -86,12 +102,13 @@ class TestAdvisorHttp(unittest.TestCase):
         self.assertNotIn("private-value", payload)
 
     def test_post_passes_question_and_history(self):
-        payload = {"report": {"root": "demo", "score": 100, "checks": []}, "question": "Why?", "history": []}
+        payload = {"report": {"root": "demo", "score": 100, "checks": [{"id": "ci", "title": "CI", "status": "warn", "detail": "none"}]},
+                   "question": "Why?", "history": [], "focus": "ci"}
         with mock.patch("repolens.web.create_ai_job", return_value="job") as create:
             request = Request(self.url + "/api/insights", data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
             with urlopen(request, timeout=5) as response:
                 self.assertEqual(response.status, 202)
-        create.assert_called_once_with(payload["report"], "Why?", [])
+        create.assert_called_once_with(payload["report"], "Why?", [], "ci")
 
     def test_malformed_bodies_are_rejected(self):
         for body in (b"[]", b"null", b"broken", b"\xff"):
