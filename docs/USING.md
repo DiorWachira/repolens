@@ -32,6 +32,8 @@ The acuity chart on the right then shows how far down your repository "reads". L
 
 ![The acuity chart after an examination: psf/requests reads the 20/25 line](images/02-acuity-chart.jpg)
 
+**Share an examination.** After an examination the address bar changes to a shareable link such as <https://repolens-klm1.onrender.com/?url=https://github.com/psf/requests>. Anyone who opens it gets a fresh examination of that repository, run on arrival, so it always reflects the repository as it is now. You can also type that form yourself to examine a repository straight from a bookmark.
+
 ## 2. Read the examination record
 
 ![The examination record: score, acuity, control strip and specimen](images/03-record.jpg)
@@ -166,7 +168,7 @@ Case files live only in this tab's session storage. They disappear when the tab 
 | "Too many requests from this address" | You hit the rate limit. Wait a few minutes. |
 | The Examiner says "No API key on server" | The deployment has no Gemini key. Use **Offline**, or ask the site owner to configure one. |
 | "Quota or rate limit reached" from Gemini | The shared Gemini quota is used up for now. Retry later or switch to **Offline**. |
-| "The server restarted…" or "job not found" | The server was redeployed or woke up mid-request. Press **Retry**, or examine again. |
+| "The server restarted…" | The server was redeployed or woke up mid-request. An examination re-runs itself once; for the Examiner, press **Retry**. |
 | **Print** does nothing | Allow pop-ups for the site, then try again. |
 
 Something else wrong? [Open an issue](https://github.com/DiorWachira/repolens/issues/new) with the repository you examined and what you saw.
