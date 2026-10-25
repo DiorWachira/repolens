@@ -5,6 +5,8 @@ services:
     name: repolens
     runtime: python
     plan: free
+    # Jobs and rate limits live in process memory; more instances would split them (#10).
+    numInstances: 1
     branch: main
     autoDeploy: true
     # The server is standard-library Python: nothing to install.
